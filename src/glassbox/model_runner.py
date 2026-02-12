@@ -17,6 +17,9 @@ class ForwardArtifacts:
     tokens: list[str]
     hidden_states: list[torch.Tensor]  # [seq, hidden] including embedding layer
     attentions: list[torch.Tensor]  # [heads, query, key]
+    prompt_token_count: int
+    generated_token_count: int
+    answer_text: str
 
 
 def resolve_device(device: str) -> str:
@@ -29,7 +32,7 @@ def resolve_device(device: str) -> str:
     return "cpu"
 
 
-def run_hf_forward(prompt: str, model_name: str, device: str) -> ForwardArtifacts:
+def run_hf_forward(prompt: str, model_name: str, device: str, max_new_tokens: int) -> ForwardArtifacts:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     resolved = resolve_device(device)
@@ -44,10 +47,27 @@ def run_hf_forward(prompt: str, model_name: str, device: str) -> ForwardArtifact
     if attention_mask is not None:
         attention_mask = attention_mask.to(resolved)
 
+    generate_kwargs: dict[str, Any] = {
+        "max_new_tokens": max_new_tokens,
+        "do_sample": False,
+    }
+    if tokenizer.pad_token_id is not None:
+        generate_kwargs["pad_token_id"] = tokenizer.pad_token_id
+    elif tokenizer.eos_token_id is not None:
+        generate_kwargs["pad_token_id"] = tokenizer.eos_token_id
+
     with torch.no_grad():
-        out = model(
+        generated_ids = model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
+            **generate_kwargs,
+        )
+
+    full_attention_mask = torch.ones_like(generated_ids, device=generated_ids.device)
+    with torch.no_grad():
+        out = model(
+            input_ids=generated_ids,
+            attention_mask=full_attention_mask,
             output_hidden_states=True,
             output_attentions=True,
             use_cache=False,
@@ -57,7 +77,10 @@ def run_hf_forward(prompt: str, model_name: str, device: str) -> ForwardArtifact
     hidden_states = [h.squeeze(0).detach().cpu() for h in out.hidden_states]
     attentions = [a.squeeze(0).detach().cpu() for a in out.attentions]
 
-    ids = [int(v) for v in input_ids[0].detach().cpu().tolist()]
+    prompt_token_count = int(input_ids.shape[1])
+    ids = [int(v) for v in generated_ids[0].detach().cpu().tolist()]
+    answer_ids = ids[prompt_token_count:]
+    answer_text = tokenizer.decode(answer_ids, skip_special_tokens=True).strip()
     tokens = tokenizer.convert_ids_to_tokens(ids)
 
     return ForwardArtifacts(
@@ -67,6 +90,9 @@ def run_hf_forward(prompt: str, model_name: str, device: str) -> ForwardArtifact
         tokens=tokens,
         hidden_states=hidden_states,
         attentions=attentions,
+        prompt_token_count=prompt_token_count,
+        generated_token_count=len(answer_ids),
+        answer_text=answer_text,
     )
 
 
@@ -75,9 +101,10 @@ def run_forward(
     model_name: str,
     device: str = "auto",
     use_toy: bool = False,
+    max_new_tokens: int = 24,
 ) -> tuple[ForwardArtifacts, str | None]:
     if use_toy:
-        toy = run_toy_forward(prompt)
+        toy = run_toy_forward(prompt, max_new_tokens=max_new_tokens)
         return (
             ForwardArtifacts(
                 source="toy",
@@ -86,14 +113,17 @@ def run_forward(
                 tokens=toy.tokens,
                 hidden_states=toy.hidden_states,
                 attentions=toy.attentions,
+                prompt_token_count=toy.prompt_token_count,
+                generated_token_count=toy.generated_token_count,
+                answer_text=toy.answer_text,
             ),
             None,
         )
 
     try:
-        return run_hf_forward(prompt, model_name, device), None
+        return run_hf_forward(prompt, model_name, device, max_new_tokens=max_new_tokens), None
     except ImportError:
-        toy = run_toy_forward(prompt)
+        toy = run_toy_forward(prompt, max_new_tokens=max_new_tokens)
         return (
             ForwardArtifacts(
                 source="toy",
@@ -102,11 +132,14 @@ def run_forward(
                 tokens=toy.tokens,
                 hidden_states=toy.hidden_states,
                 attentions=toy.attentions,
+                prompt_token_count=toy.prompt_token_count,
+                generated_token_count=toy.generated_token_count,
+                answer_text=toy.answer_text,
             ),
             "transformers is not installed; using toy fallback model",
         )
     except Exception as exc:
-        toy = run_toy_forward(prompt)
+        toy = run_toy_forward(prompt, max_new_tokens=max_new_tokens)
         return (
             ForwardArtifacts(
                 source="toy",
@@ -115,6 +148,9 @@ def run_forward(
                 tokens=toy.tokens,
                 hidden_states=toy.hidden_states,
                 attentions=toy.attentions,
+                prompt_token_count=toy.prompt_token_count,
+                generated_token_count=toy.generated_token_count,
+                answer_text=toy.answer_text,
             ),
             f"failed to run {model_name}: {exc}; using toy fallback model",
         )
@@ -135,9 +171,12 @@ def build_report(
 
     report: dict[str, Any] = {
         "prompt": prompt,
+        "answer_text": artifacts.answer_text,
         "model": artifacts.model_name,
         "source": artifacts.source,
         "num_tokens": len(tokens),
+        "prompt_token_count": artifacts.prompt_token_count,
+        "generated_token_count": artifacts.generated_token_count,
         "num_layers": len(layers),
         "tokens": tokens,
         "layers": layers,
