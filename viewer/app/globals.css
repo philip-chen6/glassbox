@@ -276,7 +276,7 @@ select {
   gap: 0.6rem;
 }
 
-.panel:last-child {
+.panel.span-2 {
   grid-column: span 2;
 }
 
@@ -320,6 +320,35 @@ svg {
   font-size: 0.85rem;
 }
 
+.edge-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  overflow: auto;
+}
+
+.edge-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.edge-table th,
+.edge-table td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid #e4ebf0;
+}
+
+.edge-table th {
+  color: #476074;
+  font-weight: 600;
+  background: #f7fbfc;
+}
+
+.edge-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
 @keyframes pulse {
   0% {
     transform: translateY(0) scale(1);
@@ -342,7 +371,7 @@ svg {
     grid-template-columns: 1fr;
   }
 
-  .panel:last-child {
+  .panel.span-2 {
     grid-column: span 1;
   }
 }

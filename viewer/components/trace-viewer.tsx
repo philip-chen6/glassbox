@@ -5,9 +5,24 @@ import { parseTrace } from "../lib/trace";
 import { TraceReport } from "../lib/types";
 
 const INITIAL_ERROR = "";
+const TOP_EDGE_COUNT = 10;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
+}
+
+function quantile(sorted: number[], q: number): number {
+  if (sorted.length === 0) {
+    return 0;
+  }
+  const pos = clamp(q, 0, 1) * (sorted.length - 1);
+  const low = Math.floor(pos);
+  const high = Math.ceil(pos);
+  if (low === high) {
+    return sorted[low];
+  }
+  const t = pos - low;
+  return sorted[low] * (1 - t) + sorted[high] * t;
 }
 
 function toHeatColor(normalized: number): string {
@@ -18,13 +33,20 @@ function toHeatColor(normalized: number): string {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+function shortToken(text: string, limit = 10): string {
+  if (text.length <= limit) {
+    return text;
+  }
+  return `${text.slice(0, limit - 1)}…`;
+}
+
 export function TraceViewer() {
   const [trace, setTrace] = useState<TraceReport | null>(null);
   const [error, setError] = useState<string>(INITIAL_ERROR);
   const [promptInput, setPromptInput] = useState("hi how are you");
   const [modelInput, setModelInput] = useState("distilgpt2");
   const [maxNewTokens, setMaxNewTokens] = useState(24);
-  const [useToyModel, setUseToyModel] = useState(true);
+  const [useToyModel, setUseToyModel] = useState(false);
   const [includeHidden, setIncludeHidden] = useState(true);
   const [includeAttention, setIncludeAttention] = useState(true);
   const [isRunningPrompt, setIsRunningPrompt] = useState(false);
@@ -36,6 +58,7 @@ export function TraceViewer() {
 
   const heatmapRef = useRef<HTMLCanvasElement | null>(null);
   const flowRef = useRef<HTMLCanvasElement | null>(null);
+  const layerMapRef = useRef<HTMLCanvasElement | null>(null);
 
   const headCount = useMemo(() => {
     if (!trace?.attentions?.[selectedLayer]) {
@@ -92,10 +115,10 @@ export function TraceViewer() {
       return;
     }
 
-    const allValues = matrix.flat();
-    const min = Math.min(...allValues);
-    const max = Math.max(...allValues);
-    const range = Math.max(max - min, 1e-9);
+    const allValues = matrix.flat().slice().sort((a, b) => a - b);
+    const lowQ = quantile(allValues, 0.05);
+    const highQ = quantile(allValues, 0.995);
+    const range = Math.max(highQ - lowQ, 1e-9);
 
     const pad = 28;
     const plotW = canvas.width - pad * 2;
@@ -105,9 +128,10 @@ export function TraceViewer() {
 
     for (let q = 0; q < qLen; q += 1) {
       for (let k = 0; k < kLen; k += 1) {
-        const value = matrix[q][k];
-        const normalized = (value - min) / range;
-        ctx.fillStyle = toHeatColor(normalized);
+        const clipped = clamp(matrix[q][k], lowQ, highQ);
+        const normalized = (clipped - lowQ) / range;
+        const contrasted = Math.pow(normalized, 0.63);
+        ctx.fillStyle = toHeatColor(contrasted);
         ctx.fillRect(pad + k * cellW, pad + q * cellH, cellW, cellH);
       }
     }
@@ -115,9 +139,13 @@ export function TraceViewer() {
     ctx.strokeStyle = "#9cb0bf";
     ctx.strokeRect(pad, pad, plotW, plotH);
 
-    ctx.strokeStyle = "#111827";
+    ctx.strokeStyle = "#0e1e2b";
     ctx.lineWidth = 2;
     ctx.strokeRect(pad, pad + selectedTokenIndex * cellH, plotW, cellH);
+
+    ctx.strokeStyle = "rgba(14,30,43,0.45)";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(pad + selectedTokenIndex * cellW, pad, cellW, plotH);
   }, [trace, selectedLayer, selectedHead, selectedTokenIndex]);
 
   useEffect(() => {
@@ -173,18 +201,80 @@ export function TraceViewer() {
     });
   }, [trace, selectedTokenIndex, selectedLayer]);
 
+  useEffect(() => {
+    const canvas = layerMapRef.current;
+    if (!canvas) {
+      return;
+    }
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!trace?.layers?.length) {
+      ctx.fillStyle = "#5c6c7a";
+      ctx.font = "16px ui-sans-serif";
+      ctx.fillText("Layer data not available.", 20, 36);
+      return;
+    }
+
+    const layerCount = trace.layers.length;
+    const tokenCount = trace.num_tokens;
+    const matrix = trace.layers.map((layer) => layer.residual_norms);
+    const allValues = matrix.flat().slice().sort((a, b) => a - b);
+    const lowQ = quantile(allValues, 0.05);
+    const highQ = quantile(allValues, 0.95);
+    const range = Math.max(highQ - lowQ, 1e-9);
+
+    const padLeft = 44;
+    const padTop = 20;
+    const plotW = canvas.width - padLeft - 16;
+    const plotH = canvas.height - padTop - 22;
+    const cellW = plotW / Math.max(tokenCount, 1);
+    const cellH = plotH / Math.max(layerCount, 1);
+
+    for (let layer = 0; layer < layerCount; layer += 1) {
+      for (let token = 0; token < tokenCount; token += 1) {
+        const value = matrix[layer]?.[token] ?? 0;
+        const normalized = (clamp(value, lowQ, highQ) - lowQ) / range;
+        const contrasted = Math.pow(normalized, 0.72);
+        ctx.fillStyle = toHeatColor(contrasted);
+        ctx.fillRect(padLeft + token * cellW, padTop + layer * cellH, cellW, cellH);
+      }
+    }
+
+    ctx.strokeStyle = "#9cb0bf";
+    ctx.strokeRect(padLeft, padTop, plotW, plotH);
+
+    ctx.strokeStyle = "#0e1e2b";
+    ctx.lineWidth = 1.8;
+    ctx.strokeRect(padLeft, padTop + selectedLayer * cellH, plotW, cellH);
+    ctx.strokeRect(padLeft + selectedTokenIndex * cellW, padTop, cellW, plotH);
+
+    ctx.fillStyle = "#3f5368";
+    ctx.font = "11px ui-sans-serif";
+    ctx.fillText("L0", 8, padTop + 10);
+    ctx.fillText(`L${layerCount - 1}`, 8, padTop + plotH - 6);
+  }, [trace, selectedLayer, selectedTokenIndex]);
+
   const tokenConnections = useMemo(() => {
     if (!trace?.attentions?.[selectedLayer]?.[selectedHead]) {
       return [];
     }
     const matrix = trace.attentions[selectedLayer][selectedHead];
     const row = matrix[selectedTokenIndex] ?? [];
-    const points = row
-      .map((weight, keyIndex) => ({ keyIndex, weight }))
-      .sort((a, b) => b.weight - a.weight)
-      .slice(0, 8);
+    const ranked = row
+      .map((weight, keyIndex) => ({
+        keyIndex,
+        weight,
+        token: trace.tokens[keyIndex]?.text ?? `[${keyIndex}]`
+      }))
+      .sort((a, b) => b.weight - a.weight);
+    const dynamicCutoff = Math.max((ranked[0]?.weight ?? 0) * 0.18, 0.01);
+    const points = ranked.filter((item) => item.weight >= dynamicCutoff).slice(0, TOP_EDGE_COUNT);
     return points;
-  }, [trace, selectedLayer, selectedHead, selectedTokenIndex]);
+  }, [trace, selectedLayer, selectedHead, selectedTokenIndex, trace?.tokens]);
 
   const flowValue = useMemo(() => {
     if (!trace?.layers?.[selectedLayer]) {
@@ -336,7 +426,7 @@ export function TraceViewer() {
                 checked={useToyModel}
                 onChange={(event) => setUseToyModel(event.target.checked)}
               />
-              Use toy model
+              Force toy model (debug)
             </label>
             <label className="toggle-inline">
               <input
@@ -490,7 +580,9 @@ export function TraceViewer() {
       <section className="panel-grid">
         <article className="card panel">
           <h2>Attention Heatmap</h2>
-          <p className="subtitle">Layer {selectedLayer}, head {selectedHead}</p>
+          <p className="subtitle">
+            Layer {selectedLayer}, head {selectedHead} (percentile-normalized)
+          </p>
           <div className="canvas-wrap">
             <canvas ref={heatmapRef} width={640} height={640} />
           </div>
@@ -502,45 +594,80 @@ export function TraceViewer() {
         </article>
 
         <article className="card panel">
-          <h2>Token Connections</h2>
-          <p className="subtitle">Top edges from query token index {selectedTokenIndex}</p>
-          <div className="svg-wrap">
-            <svg viewBox="0 0 800 320" preserveAspectRatio="xMidYMid meet">
-              {trace?.tokens.map((token, index) => {
-                const x = 40 + (index / Math.max((trace.num_tokens ?? 1) - 1, 1)) * 720;
-                return (
-                  <g key={`label-${token.index}`}>
-                    <circle cx={x} cy={42} r={index === selectedTokenIndex ? 8 : 5} fill="#0f8f8a" />
-                    <text x={x} y={72} textAnchor="middle" fontSize={12} fill="#26435c">
-                      {token.text.slice(0, 6)}
-                    </text>
-                  </g>
-                );
-              })}
-
-              {tokenConnections.map(({ keyIndex, weight }) => {
-                if (!trace?.num_tokens) {
-                  return null;
-                }
-                const x1 = 40 + (selectedTokenIndex / Math.max(trace.num_tokens - 1, 1)) * 720;
-                const x2 = 40 + (keyIndex / Math.max(trace.num_tokens - 1, 1)) * 720;
-                const midY = 170 - Math.abs(x2 - x1) * 0.12;
-                const opacity = 0.2 + weight * 0.8;
-                return (
-                  <path
-                    key={`edge-${keyIndex}`}
-                    d={`M ${x1} 96 Q ${(x1 + x2) / 2} ${midY} ${x2} 96`}
-                    stroke={`rgba(255,122,89,${opacity})`}
-                    strokeWidth={1.5 + weight * 4}
-                    fill="none"
-                  />
-                );
-              })}
-            </svg>
+          <h2>Layer Overview</h2>
+          <p className="subtitle">Residual norm map (layers x tokens)</p>
+          <div className="canvas-wrap">
+            <canvas ref={layerMapRef} width={800} height={300} />
           </div>
         </article>
 
         <article className="card panel">
+          <h2>Token Connections</h2>
+          <p className="subtitle">Top edges from query token index {selectedTokenIndex}</p>
+          <div className="svg-wrap">
+            <svg viewBox="0 0 800 320" preserveAspectRatio="xMidYMid meet">
+              <circle cx={400} cy={52} r={10} fill="#0f8f8a" />
+              <text x={400} y={28} textAnchor="middle" fontSize={12} fill="#26435c">
+                query[{selectedTokenIndex}]
+              </text>
+              <text x={400} y={78} textAnchor="middle" fontSize={13} fill="#17344a" fontWeight="600">
+                {shortToken(trace?.tokens[selectedTokenIndex]?.text ?? "-", 20)}
+              </text>
+
+              {tokenConnections.map(({ keyIndex, weight, token }, index) => {
+                if (!trace?.num_tokens || tokenConnections.length === 0) {
+                  return null;
+                }
+                const x1 = 400;
+                const x2 = 70 + (index / Math.max(tokenConnections.length - 1, 1)) * 660;
+                const y2 = 228;
+                const midY = 112 + Math.abs(x2 - x1) * 0.16;
+                const opacity = 0.24 + weight * 0.76;
+                return (
+                  <g key={`edge-${keyIndex}`}>
+                    <path
+                      d={`M ${x1} 66 Q ${(x1 + x2) / 2} ${midY} ${x2} ${y2 - 10}`}
+                      stroke={`rgba(255,122,89,${opacity})`}
+                      strokeWidth={1.5 + weight * 5}
+                      fill="none"
+                    />
+                    <circle cx={x2} cy={y2} r={6} fill="#157f9f" />
+                    <text x={x2} y={247} textAnchor="middle" fontSize={11} fill="#26435c">
+                      {shortToken(token, 11)}
+                    </text>
+                    <text x={x2} y={264} textAnchor="middle" fontSize={10} fill="#5a7084">
+                      {keyIndex}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+          <div className="edge-table-wrap">
+            <table className="edge-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>key token</th>
+                  <th>index</th>
+                  <th>weight</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tokenConnections.map((edge, index) => (
+                  <tr key={`edge-row-${edge.keyIndex}`}>
+                    <td>{index + 1}</td>
+                    <td>{edge.token}</td>
+                    <td>{edge.keyIndex}</td>
+                    <td>{edge.weight.toFixed(4)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article className="card panel span-2">
           <h2>Residual Norm Flow</h2>
           <p className="subtitle">Selected token through all layers</p>
           <div className="canvas-wrap flow-wrap">
