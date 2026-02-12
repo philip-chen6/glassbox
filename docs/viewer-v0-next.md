@@ -21,6 +21,8 @@
     - residual delta norms
     - attention output norms
     - MLP output norms
+    - animated perspective layout with moving link-energy pulses and layer sweep lighting
+    - per-layer internals HUD (clickable layer columns with delta/attn/mlp bars for selected token)
   - Residual norm flow chart across layers for selected token.
 
 ## Key decisions
