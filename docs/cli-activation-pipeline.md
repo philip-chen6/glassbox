@@ -6,6 +6,9 @@
 - Unified forward runner:
   - Hugging Face causal LM path (optional dependency on `transformers`).
   - Toy causal transformer fallback for local-first execution.
+- Generation support:
+  - Produces `answer_text` for each prompt.
+  - Runs introspection on prompt + generated tokens.
 - Layer analytics for:
   - Activation distributions.
   - Residual stream L2 norms per token.
@@ -13,12 +16,15 @@
 - Optional raw tensor export:
   - `--include-hidden`
   - `--include-attention`
+- Generation control:
+  - `--max-new-tokens`
 - Test coverage for analytics + CLI output generation.
 
 ## Key decisions
 
 - CLI-first implementation to validate signal extraction before any visualization UI.
 - JSON output as canonical contract for future 2D/3D renderer ingestion.
+- Keep generated answer and activation trace in one report so UI timelines can align with produced text.
 - Soft dependency on Hugging Face:
   - Tool still runs without `transformers`.
   - Explicit warning is attached when fallback occurs.

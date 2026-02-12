@@ -1,10 +1,10 @@
 # glassbox
 
-CLI-first tooling for inspecting internal transformer signals (attention, activation distributions, residual stream norms) from a prompt.
+CLI-first tooling for generating an answer and inspecting internal transformer signals (attention, activation distributions, residual stream norms) from a prompt.
 
 ## What exists now
 
-- `glassbox` CLI that accepts a prompt and outputs JSON summaries.
+- `glassbox` CLI that accepts a prompt, generates an answer, and outputs JSON summaries.
 - Hugging Face path (when `transformers` is installed) for real model introspection.
 - Built-in toy causal transformer fallback for zero-setup local runs.
 - Core tests for metrics and CLI behavior.
@@ -48,6 +48,7 @@ PYTHONPATH=src python3 -m glassbox.cli \
 PYTHONPATH=src python3 -m glassbox.cli \
   --prompt "show me internals" \
   --use-toy \
+  --max-new-tokens 24 \
   --include-hidden \
   --include-attention
 ```
@@ -55,6 +56,8 @@ PYTHONPATH=src python3 -m glassbox.cli \
 ## Output schema (high-level)
 
 - `tokens`: token index, id, text.
+- `answer_text`: generated answer text.
+- `prompt_token_count` and `generated_token_count`: sequence split metadata.
 - `layers[*].activation_distribution`: mean/std/min/max/p01/p99.
 - `layers[*].residual_norms`: per-token L2 norms.
 - `layers[*].attention`: entropy/max-weight summaries + strongest query/key edge per head.
