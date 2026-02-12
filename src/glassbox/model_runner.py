@@ -22,6 +22,21 @@ class ForwardArtifacts:
     answer_text: str
 
 
+def _format_token_piece(piece: str) -> str:
+    """
+    Make per-token display strings readable in the UI.
+
+    We intentionally preserve token boundaries while making whitespace visible.
+    """
+    if piece == "":
+        return "<empty>"
+    piece = piece.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    piece = piece.replace(" ", "␠")
+    if piece.strip("␠") == "":
+        return "␠"
+    return piece
+
+
 def resolve_device(device: str) -> str:
     if device != "auto":
         return device
@@ -96,7 +111,16 @@ def run_hf_forward(prompt: str, model_name: str, device: str, max_new_tokens: in
     ids = [int(v) for v in generated_ids[0].detach().cpu().tolist()]
     answer_ids = ids[prompt_token_count:]
     answer_text = tokenizer.decode(answer_ids, skip_special_tokens=True).strip()
-    tokens = tokenizer.convert_ids_to_tokens(ids)
+    tokens = [
+        _format_token_piece(
+            tokenizer.decode(
+                [token_id],
+                skip_special_tokens=False,
+                clean_up_tokenization_spaces=False,
+            )
+        )
+        for token_id in ids
+    ]
 
     return ForwardArtifacts(
         source="huggingface",
