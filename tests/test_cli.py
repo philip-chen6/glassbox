@@ -44,6 +44,27 @@ class CLITests(unittest.TestCase):
             self.assertIn("hidden_states", report)
             self.assertEqual(len(report["hidden_states"]), report["num_layers"] + 1)
 
+    def test_cli_can_include_hidden_and_attention(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out_file = Path(tmp_dir) / "report_with_all_activations.json"
+            exit_code = main(
+                [
+                    "--prompt",
+                    "show all activations",
+                    "--use-toy",
+                    "--include-hidden",
+                    "--include-attention",
+                    "--output",
+                    str(out_file),
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+            report = json.loads(out_file.read_text(encoding="utf-8"))
+            self.assertIn("hidden_states", report)
+            self.assertIn("attentions", report)
+            self.assertEqual(len(report["hidden_states"]), report["num_layers"] + 1)
+            self.assertEqual(len(report["attentions"]), report["num_layers"])
+
 
 if __name__ == "__main__":
     unittest.main()
