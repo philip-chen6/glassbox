@@ -39,6 +39,7 @@ export function parseTrace(json: string): TraceReport {
     num_layers: numLayers,
     tokens: parsed.tokens,
     layers: parsed.layers,
+    layer_internals: Array.isArray(parsed.layer_internals) ? parsed.layer_internals : undefined,
     hidden_states: parsed.hidden_states,
     attentions: parsed.attentions
   };
