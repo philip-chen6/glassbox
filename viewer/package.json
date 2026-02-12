@@ -8,7 +8,7 @@
   "scripts": {
     "clean": "rm -rf .next node_modules package-lock.json",
     "reinstall": "npm run clean && npm install",
-    "predev": "rm -rf .next",
+    "dev:reset": "rm -rf .next && next dev --turbopack",
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
