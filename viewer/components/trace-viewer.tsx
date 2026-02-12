@@ -6,6 +6,11 @@ import { TraceReport } from "../lib/types";
 
 const INITIAL_ERROR = "";
 const TOP_EDGE_COUNT = 10;
+const MODEL_PRESETS = [
+  "HuggingFaceTB/SmolLM2-360M-Instruct",
+  "Qwen/Qwen2.5-0.5B-Instruct",
+  "distilgpt2"
+];
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
@@ -40,6 +45,27 @@ function shortToken(text: string, limit = 10): string {
   return `${text.slice(0, limit - 1)}…`;
 }
 
+function dot(a: number[], b: number[]): number {
+  const size = Math.min(a.length, b.length);
+  let total = 0;
+  for (let index = 0; index < size; index += 1) {
+    total += a[index] * b[index];
+  }
+  return total;
+}
+
+function norm(a: number[]): number {
+  return Math.sqrt(Math.max(dot(a, a), 0));
+}
+
+function cosine(a: number[], b: number[]): number {
+  const denom = norm(a) * norm(b);
+  if (denom <= 1e-12) {
+    return 0;
+  }
+  return dot(a, b) / denom;
+}
+
 export function TraceViewer() {
   const [trace, setTrace] = useState<TraceReport | null>(null);
   const [error, setError] = useState<string>(INITIAL_ERROR);
@@ -59,6 +85,7 @@ export function TraceViewer() {
   const heatmapRef = useRef<HTMLCanvasElement | null>(null);
   const flowRef = useRef<HTMLCanvasElement | null>(null);
   const layerMapRef = useRef<HTMLCanvasElement | null>(null);
+  const transformRef = useRef<HTMLCanvasElement | null>(null);
 
   const headCount = useMemo(() => {
     if (!trace?.attentions?.[selectedLayer]) {
@@ -284,6 +311,94 @@ export function TraceViewer() {
     return `${value.toFixed(4)} (token=${selectedTokenIndex}, layer=${selectedLayer})`;
   }, [trace, selectedLayer, selectedTokenIndex]);
 
+  const layerTransformSeries = useMemo(() => {
+    if (!trace?.hidden_states || trace.hidden_states.length < 2) {
+      return null;
+    }
+    const points: Array<{
+      layer: number;
+      deltaNorm: number;
+      cosineToPrev: number;
+      normValue: number;
+    }> = [];
+    for (let layer = 1; layer < trace.hidden_states.length; layer += 1) {
+      const prev = trace.hidden_states[layer - 1]?.[selectedTokenIndex];
+      const curr = trace.hidden_states[layer]?.[selectedTokenIndex];
+      if (!prev || !curr) {
+        continue;
+      }
+      const deltaVector = curr.map((value, idx) => value - (prev[idx] ?? 0));
+      points.push({
+        layer: layer - 1,
+        deltaNorm: norm(deltaVector),
+        cosineToPrev: cosine(curr, prev),
+        normValue: norm(curr)
+      });
+    }
+    return points;
+  }, [trace, selectedTokenIndex]);
+
+  useEffect(() => {
+    const canvas = transformRef.current;
+    if (!canvas) {
+      return;
+    }
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!layerTransformSeries || layerTransformSeries.length === 0) {
+      ctx.fillStyle = "#5c6c7a";
+      ctx.font = "16px ui-sans-serif";
+      ctx.fillText("Hidden states required for layer-transform view.", 20, 36);
+      return;
+    }
+
+    const padLeft = 38;
+    const padRight = 20;
+    const padTop = 24;
+    const padBottom = 24;
+    const w = canvas.width - padLeft - padRight;
+    const h = canvas.height - padTop - padBottom;
+    const midY = padTop + h * 0.52;
+    const topH = h * 0.48;
+    const bottomH = h * 0.42;
+
+    const maxDelta = Math.max(...layerTransformSeries.map((point) => point.deltaNorm), 1e-9);
+    const barW = w / Math.max(layerTransformSeries.length, 1);
+
+    ctx.strokeStyle = "#d5dce4";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(padLeft, padTop, w, topH);
+    ctx.strokeRect(padLeft, midY, w, bottomH);
+
+    layerTransformSeries.forEach((point, index) => {
+      const x = padLeft + index * barW + 2;
+      const usableBar = Math.max(barW - 4, 2);
+
+      const deltaHeight = (point.deltaNorm / maxDelta) * (topH - 8);
+      ctx.fillStyle = index === selectedLayer ? "#ff7a59" : "#209b95";
+      ctx.fillRect(x, padTop + topH - deltaHeight - 2, usableBar, deltaHeight);
+
+      const cosineNorm = (point.cosineToPrev + 1) / 2;
+      const cosineHeight = cosineNorm * (bottomH - 8);
+      ctx.fillStyle = index === selectedLayer ? "#1e3a8a" : "#157f9f";
+      ctx.fillRect(x, midY + bottomH - cosineHeight - 2, usableBar, cosineHeight);
+    });
+
+    const selectedX = padLeft + selectedLayer * barW;
+    ctx.strokeStyle = "#111827";
+    ctx.lineWidth = 1.8;
+    ctx.strokeRect(selectedX, padTop, Math.max(barW, 3), h);
+
+    ctx.fillStyle = "#486175";
+    ctx.font = "11px ui-sans-serif";
+    ctx.fillText("delta norm (how much token vector changed vs previous layer)", 8, 14);
+    ctx.fillText("cosine to previous layer (direction similarity)", 8, midY - 6);
+  }, [layerTransformSeries, selectedLayer]);
+
   function applyTrace(parsed: TraceReport): void {
     setTrace(parsed);
     setSelectedLayer(0);
@@ -400,10 +515,16 @@ export function TraceViewer() {
             <input
               id="model-input"
               type="text"
+              list="model-presets"
               value={modelInput}
               onChange={(event) => setModelInput(event.target.value)}
               disabled={useToyModel}
             />
+            <datalist id="model-presets">
+              {MODEL_PRESETS.map((model) => (
+                <option key={model} value={model} />
+              ))}
+            </datalist>
           </div>
 
           <div className="control-group">
@@ -664,6 +785,17 @@ export function TraceViewer() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </article>
+
+        <article className="card panel span-2">
+          <h2>Token Transformation by Layer</h2>
+          <p className="subtitle">How the selected token vector changes from layer to layer</p>
+          <div className="canvas-wrap">
+            <canvas ref={transformRef} width={900} height={260} />
+          </div>
+          <div className="flow-value">
+            Selected token: {trace?.tokens[selectedTokenIndex]?.text ?? "-"} (index {selectedTokenIndex})
           </div>
         </article>
 
