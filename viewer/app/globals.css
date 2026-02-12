@@ -168,6 +168,20 @@ input[type="range"] {
   width: 100%;
 }
 
+input[type="text"],
+input[type="number"],
+textarea {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 0.55rem;
+  color: var(--ink);
+  padding: 0.5rem 0.55rem;
+}
+
+textarea {
+  resize: vertical;
+}
+
 select {
   height: 2rem;
   border: 1px solid var(--line);
@@ -201,6 +215,27 @@ select {
 
 .button input {
   display: none;
+}
+
+.runner-card {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.runner-grid {
+  display: grid;
+  grid-template-columns: 2fr repeat(4, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.toggle-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.86rem;
+  color: var(--ink);
 }
 
 .token-rail {
@@ -300,6 +335,10 @@ svg {
 @media (max-width: 860px) {
   .meta-grid,
   .panel-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .runner-grid {
     grid-template-columns: 1fr;
   }
 

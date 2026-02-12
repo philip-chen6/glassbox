@@ -73,6 +73,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 ## Viewer (Next.js)
 
 Interactive v0 viewer lives in `/Users/philip/Projects/glassbox/viewer` and supports:
+- in-app prompt runner (no manual JSON export required)
 - JSON upload
 - sample trace loading
 - token timeline playback
@@ -88,3 +89,9 @@ pnpm dev
 ```
 
 Then open `http://localhost:3000`.
+
+Use the `Run Prompt` card in the UI:
+- type a prompt
+- choose toy/HF model
+- keep `Include hidden states` + `Include attention maps` enabled
+- click `Run Prompt`

@@ -21,6 +21,13 @@ function toHeatColor(normalized: number): string {
 export function TraceViewer(): JSX.Element {
   const [trace, setTrace] = useState<TraceReport | null>(null);
   const [error, setError] = useState<string>(INITIAL_ERROR);
+  const [promptInput, setPromptInput] = useState("hi how are you");
+  const [modelInput, setModelInput] = useState("distilgpt2");
+  const [maxNewTokens, setMaxNewTokens] = useState(24);
+  const [useToyModel, setUseToyModel] = useState(true);
+  const [includeHidden, setIncludeHidden] = useState(true);
+  const [includeAttention, setIncludeAttention] = useState(true);
+  const [isRunningPrompt, setIsRunningPrompt] = useState(false);
   const [selectedLayer, setSelectedLayer] = useState(0);
   const [selectedHead, setSelectedHead] = useState(0);
   const [selectedTokenIndex, setSelectedTokenIndex] = useState(0);
@@ -187,6 +194,52 @@ export function TraceViewer(): JSX.Element {
     return `${value.toFixed(4)} (token=${selectedTokenIndex}, layer=${selectedLayer})`;
   }, [trace, selectedLayer, selectedTokenIndex]);
 
+  function applyTrace(parsed: TraceReport): void {
+    setTrace(parsed);
+    setSelectedLayer(0);
+    setSelectedHead(0);
+    setSelectedTokenIndex(0);
+    setIsPlaying(false);
+  }
+
+  async function runPrompt(): Promise<void> {
+    setError(INITIAL_ERROR);
+    if (!promptInput.trim()) {
+      setError("Prompt is required.");
+      return;
+    }
+    setIsRunningPrompt(true);
+    try {
+      const response = await fetch("/api/trace", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          prompt: promptInput,
+          model: modelInput,
+          useToy: useToyModel,
+          includeHidden,
+          includeAttention,
+          maxNewTokens
+        })
+      });
+      const payload = (await response.json()) as { trace?: unknown; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `Request failed with status ${response.status}`);
+      }
+      if (!payload.trace) {
+        throw new Error("Missing trace in response");
+      }
+      const parsed = parseTrace(JSON.stringify(payload.trace));
+      applyTrace(parsed);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to run prompt");
+    } finally {
+      setIsRunningPrompt(false);
+    }
+  }
+
   async function loadSample(): Promise<void> {
     setError(INITIAL_ERROR);
     try {
@@ -196,10 +249,7 @@ export function TraceViewer(): JSX.Element {
       }
       const text = await response.text();
       const parsed = parseTrace(text);
-      setTrace(parsed);
-      setSelectedLayer(0);
-      setSelectedHead(0);
-      setSelectedTokenIndex(0);
+      applyTrace(parsed);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load sample trace");
     }
@@ -214,10 +264,7 @@ export function TraceViewer(): JSX.Element {
     try {
       const text = await file.text();
       const parsed = parseTrace(text);
-      setTrace(parsed);
-      setSelectedLayer(0);
-      setSelectedHead(0);
-      setSelectedTokenIndex(0);
+      applyTrace(parsed);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to parse trace");
     }
@@ -243,6 +290,85 @@ export function TraceViewer(): JSX.Element {
           </button>
         </div>
       </header>
+
+      <section className="card runner-card">
+        <h2>Run Prompt</h2>
+        <div className="runner-grid">
+          <div className="control-group wide">
+            <label htmlFor="prompt-input">Prompt</label>
+            <textarea
+              id="prompt-input"
+              rows={3}
+              value={promptInput}
+              onChange={(event) => setPromptInput(event.target.value)}
+              placeholder="Type prompt text..."
+            />
+          </div>
+
+          <div className="control-group">
+            <label htmlFor="model-input">Model</label>
+            <input
+              id="model-input"
+              type="text"
+              value={modelInput}
+              onChange={(event) => setModelInput(event.target.value)}
+              disabled={useToyModel}
+            />
+          </div>
+
+          <div className="control-group">
+            <label htmlFor="new-token-input">Max New Tokens</label>
+            <input
+              id="new-token-input"
+              type="number"
+              min={0}
+              max={256}
+              value={maxNewTokens}
+              onChange={(event) => setMaxNewTokens(Math.max(0, Number(event.target.value) || 0))}
+            />
+          </div>
+
+          <div className="control-group">
+            <label>Options</label>
+            <label className="toggle-inline">
+              <input
+                type="checkbox"
+                checked={useToyModel}
+                onChange={(event) => setUseToyModel(event.target.checked)}
+              />
+              Use toy model
+            </label>
+            <label className="toggle-inline">
+              <input
+                type="checkbox"
+                checked={includeHidden}
+                onChange={(event) => setIncludeHidden(event.target.checked)}
+              />
+              Include hidden states
+            </label>
+            <label className="toggle-inline">
+              <input
+                type="checkbox"
+                checked={includeAttention}
+                onChange={(event) => setIncludeAttention(event.target.checked)}
+              />
+              Include attention maps
+            </label>
+          </div>
+
+          <div className="control-group">
+            <label>Run</label>
+            <button
+              className="button"
+              onClick={runPrompt}
+              type="button"
+              disabled={isRunningPrompt || !promptInput.trim()}
+            >
+              {isRunningPrompt ? "Running..." : "Run Prompt"}
+            </button>
+          </div>
+        </div>
+      </section>
 
       <section className="card summary-card">
         <div className="meta-grid">

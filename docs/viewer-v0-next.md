@@ -4,6 +4,7 @@
 
 - Next.js + React + TypeScript viewer under `/Users/philip/Projects/glassbox/viewer`.
 - Client-side trace ingestion:
+  - Run prompt directly in UI via Next API route (`/api/trace`) that calls Python CLI.
   - Upload any CLI output JSON file.
   - Load bundled sample trace from `public/samples/trace.json`.
 - Interactive controls:
@@ -11,6 +12,7 @@
   - Head selector (when attention tensors are available).
   - Token timeline scrubber.
   - Play/pause token playback with speed control.
+  - Prompt options (toy/HF, max new tokens, include hidden, include attention).
 - Visualization panels:
   - Attention heatmap (selected layer/head).
   - Token connection arcs (top edges from selected query token).
@@ -23,6 +25,7 @@
   - Canvas for heatmap and residual flow.
   - SVG for token edge arcs.
 - Reused CLI JSON as the direct frontend contract (no extra backend required yet).
+- Added a lightweight backend route only for local UX: users can run prompts from UI without manual file export/import.
 - Sample trace is generated from CLI with both `--include-hidden` and `--include-attention` to validate full-path UI.
 
 ## Notes
