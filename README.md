@@ -80,7 +80,7 @@ Interactive v0 viewer lives in `/Users/philip/Projects/glassbox/viewer` and supp
 - percentile-normalized attention heatmap
 - layer overview heatmap (layers x tokens, residual norms)
 - token connections with top-edge table
-- token transformation panel (layer-to-layer vector change for selected token)
+- neuron flow corridor (layered neuron activations + signed links for selected token)
 - residual norm flow plot
 
 Run:
@@ -91,6 +91,8 @@ nvm use 22
 npm install
 npm run dev
 ```
+
+`npm run dev` uses Turbopack for fast HMR.
 
 Then open `http://localhost:3000`.
 
