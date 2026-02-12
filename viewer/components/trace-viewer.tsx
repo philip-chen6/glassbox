@@ -18,7 +18,7 @@ function toHeatColor(normalized: number): string {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-export function TraceViewer(): JSX.Element {
+export function TraceViewer() {
   const [trace, setTrace] = useState<TraceReport | null>(null);
   const [error, setError] = useState<string>(INITIAL_ERROR);
   const [promptInput, setPromptInput] = useState("hi how are you");
