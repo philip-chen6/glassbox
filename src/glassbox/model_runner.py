@@ -37,7 +37,12 @@ def run_hf_forward(prompt: str, model_name: str, device: str, max_new_tokens: in
 
     resolved = resolve_device(device)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        attn_implementation="eager",
+    )
+    model.config.output_attentions = True
+    model.config.output_hidden_states = True
     model.to(resolved)
     model.eval()
 
@@ -77,8 +82,15 @@ def run_hf_forward(prompt: str, model_name: str, device: str, max_new_tokens: in
             return_dict=True,
         )
 
+    if out.hidden_states is None:
+        raise RuntimeError("Model did not return hidden states.")
+    if out.attentions is None or any(attn is None for attn in out.attentions):
+        raise RuntimeError(
+            "Model did not return attention tensors. Try eager attention implementation."
+        )
+
     hidden_states = [h.squeeze(0).detach().cpu() for h in out.hidden_states]
-    attentions = [a.squeeze(0).detach().cpu() for a in out.attentions]
+    attentions = [a.squeeze(0).detach().cpu() for a in out.attentions if a is not None]
 
     prompt_token_count = int(input_ids.shape[1])
     ids = [int(v) for v in generated_ids[0].detach().cpu().tolist()]
