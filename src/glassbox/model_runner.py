@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import torch
 
-from .analysis import summarize_layers
+from .analysis import summarize_layers, tensor_distribution_stats
 from .toy_model import run_toy_forward
 
 
@@ -17,6 +17,8 @@ class ForwardArtifacts:
     tokens: list[str]
     hidden_states: list[torch.Tensor]  # [seq, hidden] including embedding layer
     attentions: list[torch.Tensor]  # [heads, query, key]
+    attention_outputs: list[torch.Tensor] | None  # [seq, hidden] per layer
+    mlp_outputs: list[torch.Tensor] | None  # [seq, hidden] per layer
     prompt_token_count: int
     generated_token_count: int
     answer_text: str
@@ -45,6 +47,29 @@ def resolve_device(device: str) -> str:
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+def _extract_first_tensor(output: Any) -> torch.Tensor | None:
+    if isinstance(output, torch.Tensor):
+        return output
+    if isinstance(output, (tuple, list)):
+        for item in output:
+            found = _extract_first_tensor(item)
+            if found is not None:
+                return found
+    return None
+
+
+def _build_output_hook(storage: list[torch.Tensor | None]) -> Callable[..., None]:
+    def _hook(_module: Any, _inputs: Any, output: Any) -> None:
+        storage.append(_extract_first_tensor(output))
+
+    return _hook
+
+
+def _l2_per_token(tensor_2d: torch.Tensor) -> list[float]:
+    norms = torch.linalg.vector_norm(tensor_2d.detach().float(), dim=-1)
+    return [float(v.item()) for v in norms]
 
 
 def run_hf_forward(prompt: str, model_name: str, device: str, max_new_tokens: int) -> ForwardArtifacts:
@@ -87,15 +112,31 @@ def run_hf_forward(prompt: str, model_name: str, device: str, max_new_tokens: in
         generated_ids = input_ids
 
     full_attention_mask = torch.ones_like(generated_ids, device=generated_ids.device)
+    attn_raw_outputs: list[torch.Tensor | None] = []
+    mlp_raw_outputs: list[torch.Tensor | None] = []
+    hook_handles: list[Any] = []
+
+    blocks = getattr(getattr(model, "transformer", None), "h", None)
+    if blocks is not None:
+        for block in blocks:
+            if hasattr(block, "attn"):
+                hook_handles.append(block.attn.register_forward_hook(_build_output_hook(attn_raw_outputs)))
+            if hasattr(block, "mlp"):
+                hook_handles.append(block.mlp.register_forward_hook(_build_output_hook(mlp_raw_outputs)))
+
     with torch.no_grad():
-        out = model(
-            input_ids=generated_ids,
-            attention_mask=full_attention_mask,
-            output_hidden_states=True,
-            output_attentions=True,
-            use_cache=False,
-            return_dict=True,
-        )
+        try:
+            out = model(
+                input_ids=generated_ids,
+                attention_mask=full_attention_mask,
+                output_hidden_states=True,
+                output_attentions=True,
+                use_cache=False,
+                return_dict=True,
+            )
+        finally:
+            for handle in hook_handles:
+                handle.remove()
 
     if out.hidden_states is None:
         raise RuntimeError("Model did not return hidden states.")
@@ -106,6 +147,35 @@ def run_hf_forward(prompt: str, model_name: str, device: str, max_new_tokens: in
 
     hidden_states = [h.squeeze(0).detach().cpu() for h in out.hidden_states]
     attentions = [a.squeeze(0).detach().cpu() for a in out.attentions if a is not None]
+    attention_outputs: list[torch.Tensor] | None = None
+    mlp_outputs: list[torch.Tensor] | None = None
+
+    expected_layers = len(hidden_states) - 1
+    if (
+        expected_layers > 0
+        and len(attn_raw_outputs) >= expected_layers
+        and all(t is not None for t in attn_raw_outputs[:expected_layers])
+    ):
+        attention_outputs = []
+        for tensor in attn_raw_outputs[:expected_layers]:
+            assert tensor is not None
+            if tensor.ndim == 3:
+                attention_outputs.append(tensor.squeeze(0).detach().cpu())
+            elif tensor.ndim == 2:
+                attention_outputs.append(tensor.detach().cpu())
+
+    if (
+        expected_layers > 0
+        and len(mlp_raw_outputs) >= expected_layers
+        and all(t is not None for t in mlp_raw_outputs[:expected_layers])
+    ):
+        mlp_outputs = []
+        for tensor in mlp_raw_outputs[:expected_layers]:
+            assert tensor is not None
+            if tensor.ndim == 3:
+                mlp_outputs.append(tensor.squeeze(0).detach().cpu())
+            elif tensor.ndim == 2:
+                mlp_outputs.append(tensor.detach().cpu())
 
     prompt_token_count = int(input_ids.shape[1])
     ids = [int(v) for v in generated_ids[0].detach().cpu().tolist()]
@@ -129,6 +199,8 @@ def run_hf_forward(prompt: str, model_name: str, device: str, max_new_tokens: in
         tokens=tokens,
         hidden_states=hidden_states,
         attentions=attentions,
+        attention_outputs=attention_outputs,
+        mlp_outputs=mlp_outputs,
         prompt_token_count=prompt_token_count,
         generated_token_count=len(answer_ids),
         answer_text=answer_text,
@@ -152,6 +224,8 @@ def run_forward(
                 tokens=toy.tokens,
                 hidden_states=toy.hidden_states,
                 attentions=toy.attentions,
+                attention_outputs=toy.attention_outputs,
+                mlp_outputs=toy.mlp_outputs,
                 prompt_token_count=toy.prompt_token_count,
                 generated_token_count=toy.generated_token_count,
                 answer_text=toy.answer_text,
@@ -171,6 +245,8 @@ def run_forward(
                 tokens=toy.tokens,
                 hidden_states=toy.hidden_states,
                 attentions=toy.attentions,
+                attention_outputs=toy.attention_outputs,
+                mlp_outputs=toy.mlp_outputs,
                 prompt_token_count=toy.prompt_token_count,
                 generated_token_count=toy.generated_token_count,
                 answer_text=toy.answer_text,
@@ -187,6 +263,8 @@ def run_forward(
                 tokens=toy.tokens,
                 hidden_states=toy.hidden_states,
                 attentions=toy.attentions,
+                attention_outputs=toy.attention_outputs,
+                mlp_outputs=toy.mlp_outputs,
                 prompt_token_count=toy.prompt_token_count,
                 generated_token_count=toy.generated_token_count,
                 answer_text=toy.answer_text,
@@ -207,6 +285,28 @@ def build_report(
         for idx, (token_id, text) in enumerate(zip(artifacts.token_ids, artifacts.tokens))
     ]
     layers = summarize_layers(artifacts.hidden_states, artifacts.attentions)
+    layer_internals: list[dict[str, Any]] = []
+    for layer_idx in range(len(artifacts.hidden_states) - 1):
+        prev = artifacts.hidden_states[layer_idx]
+        curr = artifacts.hidden_states[layer_idx + 1]
+        delta = curr - prev
+        entry: dict[str, Any] = {
+            "layer_index": layer_idx,
+            "residual_delta_norms": _l2_per_token(delta),
+            "residual_state_norms": _l2_per_token(curr),
+            "residual_delta_distribution": tensor_distribution_stats(delta),
+        }
+
+        if artifacts.attention_outputs and layer_idx < len(artifacts.attention_outputs):
+            attn_out = artifacts.attention_outputs[layer_idx]
+            entry["attention_output_norms"] = _l2_per_token(attn_out)
+            entry["attention_output_distribution"] = tensor_distribution_stats(attn_out)
+        if artifacts.mlp_outputs and layer_idx < len(artifacts.mlp_outputs):
+            mlp_out = artifacts.mlp_outputs[layer_idx]
+            entry["mlp_output_norms"] = _l2_per_token(mlp_out)
+            entry["mlp_output_distribution"] = tensor_distribution_stats(mlp_out)
+
+        layer_internals.append(entry)
 
     report: dict[str, Any] = {
         "prompt": prompt,
@@ -219,6 +319,7 @@ def build_report(
         "num_layers": len(layers),
         "tokens": tokens,
         "layers": layers,
+        "layer_internals": layer_internals,
     }
     if warning:
         report["warning"] = warning

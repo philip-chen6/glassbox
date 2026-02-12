@@ -13,6 +13,8 @@ class ToyForwardOutput:
     tokens: list[str]
     hidden_states: list[torch.Tensor]  # [seq, hidden] per layer, including embeddings
     attentions: list[torch.Tensor]  # [heads, query, key] per layer
+    attention_outputs: list[torch.Tensor]  # [seq, hidden] per layer
+    mlp_outputs: list[torch.Tensor]  # [seq, hidden] per layer
     prompt_token_count: int
     generated_token_count: int
     answer_text: str
@@ -62,7 +64,9 @@ class ToyBlock(nn.Module):
             nn.Linear(d_model * mlp_mult, d_model),
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, x: torch.Tensor, attn_mask: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         attn_input = self.ln1(x)
         attn_output, attn_weights = self.attn(
             attn_input,
@@ -73,8 +77,9 @@ class ToyBlock(nn.Module):
             average_attn_weights=False,
         )
         x = x + attn_output
-        x = x + self.mlp(self.ln2(x))
-        return x, attn_weights
+        mlp_output = self.mlp(self.ln2(x))
+        x = x + mlp_output
+        return x, attn_weights, attn_output, mlp_output
 
 
 class ToyCausalTransformer(nn.Module):
@@ -93,7 +98,9 @@ class ToyCausalTransformer(nn.Module):
         self.blocks = nn.ModuleList([ToyBlock(d_model, n_heads) for _ in range(n_layers)])
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
 
-    def forward(self, token_ids: torch.Tensor) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
+    def forward(
+        self, token_ids: torch.Tensor
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
         batch_size, seq_len = token_ids.shape
         if batch_size != 1:
             raise ValueError(f"Toy model currently supports batch=1, got {batch_size}")
@@ -105,6 +112,8 @@ class ToyCausalTransformer(nn.Module):
 
         hidden_states: list[torch.Tensor] = [x.squeeze(0)]
         attentions: list[torch.Tensor] = []
+        attention_outputs: list[torch.Tensor] = []
+        mlp_outputs: list[torch.Tensor] = []
 
         mask = torch.triu(
             torch.ones(seq_len, seq_len, device=token_ids.device, dtype=torch.bool),
@@ -112,12 +121,14 @@ class ToyCausalTransformer(nn.Module):
         )
 
         for block in self.blocks:
-            x, attn_weights = block(x, mask)
+            x, attn_weights, attn_output, mlp_output = block(x, mask)
             hidden_states.append(x.squeeze(0))
             attentions.append(attn_weights.squeeze(0))
+            attention_outputs.append(attn_output.squeeze(0))
+            mlp_outputs.append(mlp_output.squeeze(0))
 
         logits = self.lm_head(x).squeeze(0)
-        return hidden_states, attentions, logits
+        return hidden_states, attentions, attention_outputs, mlp_outputs, logits
 
 
 def run_toy_forward(prompt: str, seed: int = 7, max_new_tokens: int = 24) -> ToyForwardOutput:
@@ -132,12 +143,12 @@ def run_toy_forward(prompt: str, seed: int = 7, max_new_tokens: int = 24) -> Toy
     with torch.no_grad():
         for _ in range(max_new_tokens):
             ids = torch.tensor([generated_ids], dtype=torch.long)
-            _, _, logits = model(ids)
+            _, _, _, _, logits = model(ids)
             next_id = int(torch.argmax(logits[-1]).item())
             generated_ids.append(next_id)
 
         ids = torch.tensor([generated_ids], dtype=torch.long)
-        hidden_states, attentions, _ = model(ids)
+        hidden_states, attentions, attention_outputs, mlp_outputs, _ = model(ids)
 
     tokens = tokenizer.decode_ids(generated_ids, vocab)
     prompt_token_count = len(prompt_ids)
@@ -149,6 +160,8 @@ def run_toy_forward(prompt: str, seed: int = 7, max_new_tokens: int = 24) -> Toy
         tokens=tokens,
         hidden_states=hidden_states,
         attentions=attentions,
+        attention_outputs=attention_outputs,
+        mlp_outputs=mlp_outputs,
         prompt_token_count=prompt_token_count,
         generated_token_count=len(generated_ids) - prompt_token_count,
         answer_text=answer_text,
