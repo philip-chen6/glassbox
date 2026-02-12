@@ -13,6 +13,9 @@ class ToyForwardOutput:
     tokens: list[str]
     hidden_states: list[torch.Tensor]  # [seq, hidden] per layer, including embeddings
     attentions: list[torch.Tensor]  # [heads, query, key] per layer
+    prompt_token_count: int
+    generated_token_count: int
+    answer_text: str
 
 
 class ToyTokenizer:
@@ -32,6 +35,15 @@ class ToyTokenizer:
         vocab = self.build_vocab(tokens)
         ids = [vocab.get(tok, vocab["<unk>"]) for tok in tokens]
         return ids, tokens, vocab
+
+    def decode_ids(self, ids: list[int], vocab: dict[str, int]) -> list[str]:
+        inverse_vocab = {value: key for key, value in vocab.items()}
+        return [inverse_vocab.get(token_id, "<unk>") for token_id in ids]
+
+    def detokenize(self, tokens: list[str]) -> str:
+        text = " ".join(tokens)
+        text = re.sub(r"\s+([,.!?;:])", r"\1", text)
+        return text.strip()
 
 
 class ToyBlock(nn.Module):
@@ -75,14 +87,18 @@ class ToyCausalTransformer(nn.Module):
         max_seq_len: int = 512,
     ):
         super().__init__()
+        self.max_seq_len = max_seq_len
         self.token_emb = nn.Embedding(vocab_size, d_model)
         self.pos_emb = nn.Embedding(max_seq_len, d_model)
         self.blocks = nn.ModuleList([ToyBlock(d_model, n_heads) for _ in range(n_layers)])
+        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
 
-    def forward(self, token_ids: torch.Tensor) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    def forward(self, token_ids: torch.Tensor) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
         batch_size, seq_len = token_ids.shape
         if batch_size != 1:
             raise ValueError(f"Toy model currently supports batch=1, got {batch_size}")
+        if seq_len > self.max_seq_len:
+            raise ValueError(f"Token length {seq_len} exceeds max_seq_len={self.max_seq_len}")
 
         pos_ids = torch.arange(seq_len, device=token_ids.device).unsqueeze(0)
         x = self.token_emb(token_ids) + self.pos_emb(pos_ids)
@@ -100,24 +116,40 @@ class ToyCausalTransformer(nn.Module):
             hidden_states.append(x.squeeze(0))
             attentions.append(attn_weights.squeeze(0))
 
-        return hidden_states, attentions
+        logits = self.lm_head(x).squeeze(0)
+        return hidden_states, attentions, logits
 
 
-def run_toy_forward(prompt: str, seed: int = 7) -> ToyForwardOutput:
+def run_toy_forward(prompt: str, seed: int = 7, max_new_tokens: int = 24) -> ToyForwardOutput:
     tokenizer = ToyTokenizer()
-    token_ids, tokens, vocab = tokenizer.encode(prompt)
+    prompt_ids, _, vocab = tokenizer.encode(prompt)
 
     torch.manual_seed(seed)
     model = ToyCausalTransformer(vocab_size=len(vocab))
     model.eval()
 
-    ids = torch.tensor([token_ids], dtype=torch.long)
+    generated_ids = list(prompt_ids)
     with torch.no_grad():
-        hidden_states, attentions = model(ids)
+        for _ in range(max_new_tokens):
+            ids = torch.tensor([generated_ids], dtype=torch.long)
+            _, _, logits = model(ids)
+            next_id = int(torch.argmax(logits[-1]).item())
+            generated_ids.append(next_id)
+
+        ids = torch.tensor([generated_ids], dtype=torch.long)
+        hidden_states, attentions, _ = model(ids)
+
+    tokens = tokenizer.decode_ids(generated_ids, vocab)
+    prompt_token_count = len(prompt_ids)
+    answer_tokens = tokens[prompt_token_count:]
+    answer_text = tokenizer.detokenize(answer_tokens)
 
     return ToyForwardOutput(
-        token_ids=token_ids,
+        token_ids=generated_ids,
         tokens=tokens,
         hidden_states=hidden_states,
         attentions=attentions,
+        prompt_token_count=prompt_token_count,
+        generated_token_count=len(generated_ids) - prompt_token_count,
+        answer_text=answer_text,
     )
