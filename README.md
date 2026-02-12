@@ -87,8 +87,8 @@ Run:
 ```bash
 cd viewer
 nvm use 22
-pnpm install
-pnpm dev
+npm install
+npm run dev
 ```
 
 Then open `http://localhost:3000`.

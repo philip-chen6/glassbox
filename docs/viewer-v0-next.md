@@ -32,7 +32,6 @@
 
 ## Notes
 
-- This environment could not install pnpm packages due blocked npm registry access, so runtime verification of `pnpm dev` was not possible here.
 - Python CLI outputs and tests remain fully verified.
 
 ## Next steps
