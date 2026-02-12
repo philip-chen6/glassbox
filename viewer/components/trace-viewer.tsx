@@ -81,6 +81,12 @@ type FlowLink = {
   positive: boolean;
 };
 
+type LayerSignal = {
+  delta: number;
+  attention: number;
+  mlp: number;
+};
+
 export function TraceViewer() {
   const [trace, setTrace] = useState<TraceReport | null>(null);
   const [error, setError] = useState<string>(INITIAL_ERROR);
@@ -348,14 +354,42 @@ export function TraceViewer() {
     const allAbs = layers.flat().map((node) => node.absValue);
     const globalMaxAbs = Math.max(...allAbs, 1e-9);
 
+    const layerSignalsRaw: LayerSignal[] = [];
+    for (let layer = 0; layer < layers.length; layer += 1) {
+      if (trace.layer_internals && layer < trace.layer_internals.length) {
+        const internals = trace.layer_internals[layer];
+        layerSignalsRaw.push({
+          delta: internals.residual_delta_norms?.[selectedTokenIndex] ?? 0,
+          attention: internals.attention_output_norms?.[selectedTokenIndex] ?? 0,
+          mlp: internals.mlp_output_norms?.[selectedTokenIndex] ?? 0
+        });
+      } else {
+        layerSignalsRaw.push({
+          delta: 0,
+          attention: 0,
+          mlp: 0
+        });
+      }
+    }
+
+    const maxDelta = Math.max(...layerSignalsRaw.map((s) => s.delta), 1e-9);
+    const maxAttention = Math.max(...layerSignalsRaw.map((s) => s.attention), 1e-9);
+    const maxMlp = Math.max(...layerSignalsRaw.map((s) => s.mlp), 1e-9);
+    const layerSignals = layerSignalsRaw.map((signal) => ({
+      delta: signal.delta / maxDelta,
+      attention: signal.attention / maxAttention,
+      mlp: signal.mlp / maxMlp
+    }));
+
     const links: FlowLink[] = [];
     for (let layer = 0; layer < layers.length - 1; layer += 1) {
       const left = layers[layer];
       const right = layers[layer + 1];
+      const layerDrive = 0.4 + layerSignals[layer].delta + layerSignals[layer].attention;
       const ranked: FlowLink[] = [];
       left.forEach((a, fromRank) => {
         right.forEach((b, toRank) => {
-          const signed = a.value * b.value;
+          const signed = a.value * b.value * layerDrive;
           ranked.push({
             fromLayer: layer,
             fromRank,
@@ -375,7 +409,8 @@ export function TraceViewer() {
       layers,
       links,
       globalMaxAbs,
-      maxLinkStrength
+      maxLinkStrength,
+      layerSignals
     };
   }, [trace, selectedTokenIndex]);
 
@@ -397,11 +432,11 @@ export function TraceViewer() {
       return;
     }
 
-    const { layers, links, globalMaxAbs, maxLinkStrength } = neuronFlowData;
+    const { layers, links, globalMaxAbs, maxLinkStrength, layerSignals } = neuronFlowData;
     const layerCount = layers.length;
     const nodeCount = Math.max(...layers.map((nodes) => nodes.length), 1);
     const padX = 68;
-    const padY = 40;
+    const padY = 72;
     const w = canvas.width - padX * 2;
     const h = canvas.height - padY * 2;
 
@@ -410,6 +445,39 @@ export function TraceViewer() {
     bg.addColorStop(1, "#111827");
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const metricBaseY = 16;
+    const metricHeight = 28;
+    const drawMetricRibbon = (
+      key: keyof LayerSignal,
+      color: string,
+      label: string,
+      offset: number
+    ) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.8;
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      layerSignals.forEach((signal, layerIndex) => {
+        const x = padX + (layerIndex / Math.max(layerCount - 1, 1)) * w;
+        const value = signal[key];
+        const y = metricBaseY + offset + metricHeight - value * metricHeight;
+        if (layerIndex === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.font = "10px ui-sans-serif";
+      ctx.fillText(label, 8, metricBaseY + offset + 10);
+      ctx.globalAlpha = 1;
+    };
+
+    drawMetricRibbon("delta", "#ff8f7a", "delta", 0);
+    drawMetricRibbon("attention", "#74d7ff", "attn", 10);
+    drawMetricRibbon("mlp", "#9dff9d", "mlp", 20);
 
     const nodePositions: Array<Array<{ x: number; y: number; node: FlowNeuron }>> = layers.map(
       (nodes, layerIndex) => {
@@ -445,7 +513,9 @@ export function TraceViewer() {
     nodePositions.forEach((nodes, layerIndex) => {
       nodes.forEach(({ x, y, node }) => {
         const intensity = clamp(node.absValue / globalMaxAbs, 0, 1);
-        const radius = 3 + intensity * 8;
+        const signal = layerSignals[layerIndex];
+        const signalBoost = 1 + signal.delta * 0.9 + signal.attention * 0.55 + signal.mlp * 0.4;
+        const radius = (3 + intensity * 8) * signalBoost;
         const isSelectedLayer = layerIndex === selectedLayer;
         const core = node.value >= 0 ? "#ffd9d2" : "#d7f1ff";
         const glow = node.value >= 0 ? "rgba(255,136,125,0.7)" : "rgba(105,203,255,0.72)";
@@ -474,7 +544,7 @@ export function TraceViewer() {
 
       ctx.fillStyle = layerIndex === selectedLayer ? "#f8fafc" : "#9fb2c8";
       ctx.font = layerIndex === selectedLayer ? "12px ui-sans-serif" : "11px ui-sans-serif";
-      ctx.fillText(`L${layerIndex}`, x - 8, 20);
+      ctx.fillText(`L${layerIndex}`, x - 8, 58);
     });
   }, [neuronFlowData, selectedLayer]);
 
@@ -870,10 +940,17 @@ export function TraceViewer() {
         <article className="card panel span-2">
           <h2>Neuron Flow Corridor</h2>
           <p className="subtitle">
-            3b1b-style layered neuron activation + signed co-activation links (selected token)
+            3b1b-style corridor driven by per-layer internals (delta, attention output, MLP output)
           </p>
-          <div className="canvas-wrap">
+          <div className="canvas-wrap neuron-canvas-wrap">
             <canvas ref={neuronFlowRef} width={1100} height={380} />
+          </div>
+          <div className="neuron-legend">
+            <span className="metric metric-delta">delta</span>
+            <span className="metric metric-attn">attention out</span>
+            <span className="metric metric-mlp">mlp out</span>
+            <span className="metric metric-pos">positive link</span>
+            <span className="metric metric-neg">negative link</span>
           </div>
           <div className="flow-value">
             Selected token: {trace?.tokens[selectedTokenIndex]?.text ?? "-"} (index {selectedTokenIndex})

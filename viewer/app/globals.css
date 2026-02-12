@@ -320,6 +320,55 @@ svg {
   font-size: 0.85rem;
 }
 
+.neuron-canvas-wrap {
+  border-color: #0f1f39;
+  box-shadow: inset 0 0 0 1px rgba(90, 134, 196, 0.22), 0 8px 24px rgba(8, 18, 34, 0.2);
+  background: radial-gradient(circle at 40% -40%, #1b2d57, #0a1326 56%, #070f20 100%);
+}
+
+.neuron-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.metric {
+  font-size: 0.76rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid transparent;
+}
+
+.metric-delta {
+  color: #8a2f1d;
+  border-color: #ffc6ba;
+  background: #fff0ec;
+}
+
+.metric-attn {
+  color: #114c69;
+  border-color: #bce9ff;
+  background: #edf9ff;
+}
+
+.metric-mlp {
+  color: #1f5c23;
+  border-color: #c7f4c9;
+  background: #effff0;
+}
+
+.metric-pos {
+  color: #7e2c1f;
+  border-color: #ffbeb0;
+  background: #ffefeb;
+}
+
+.metric-neg {
+  color: #1b4766;
+  border-color: #b7e6ff;
+  background: #edf8ff;
+}
+
 .edge-table-wrap {
   border: 1px solid var(--line);
   border-radius: 0.65rem;
