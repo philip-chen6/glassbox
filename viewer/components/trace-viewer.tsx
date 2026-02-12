@@ -66,6 +66,21 @@ function cosine(a: number[], b: number[]): number {
   return dot(a, b) / denom;
 }
 
+type FlowNeuron = {
+  dim: number;
+  value: number;
+  absValue: number;
+};
+
+type FlowLink = {
+  fromLayer: number;
+  fromRank: number;
+  toLayer: number;
+  toRank: number;
+  strength: number;
+  positive: boolean;
+};
+
 export function TraceViewer() {
   const [trace, setTrace] = useState<TraceReport | null>(null);
   const [error, setError] = useState<string>(INITIAL_ERROR);
@@ -85,7 +100,7 @@ export function TraceViewer() {
   const heatmapRef = useRef<HTMLCanvasElement | null>(null);
   const flowRef = useRef<HTMLCanvasElement | null>(null);
   const layerMapRef = useRef<HTMLCanvasElement | null>(null);
-  const transformRef = useRef<HTMLCanvasElement | null>(null);
+  const neuronFlowRef = useRef<HTMLCanvasElement | null>(null);
 
   const headCount = useMemo(() => {
     if (!trace?.attentions?.[selectedLayer]) {
@@ -311,35 +326,61 @@ export function TraceViewer() {
     return `${value.toFixed(4)} (token=${selectedTokenIndex}, layer=${selectedLayer})`;
   }, [trace, selectedLayer, selectedTokenIndex]);
 
-  const layerTransformSeries = useMemo(() => {
-    if (!trace?.hidden_states || trace.hidden_states.length < 2) {
+  const neuronFlowData = useMemo(() => {
+    if (!trace?.hidden_states || trace.hidden_states.length < 3) {
       return null;
     }
-    const points: Array<{
-      layer: number;
-      deltaNorm: number;
-      cosineToPrev: number;
-      normValue: number;
-    }> = [];
-    for (let layer = 1; layer < trace.hidden_states.length; layer += 1) {
-      const prev = trace.hidden_states[layer - 1]?.[selectedTokenIndex];
-      const curr = trace.hidden_states[layer]?.[selectedTokenIndex];
-      if (!prev || !curr) {
-        continue;
-      }
-      const deltaVector = curr.map((value, idx) => value - (prev[idx] ?? 0));
-      points.push({
-        layer: layer - 1,
-        deltaNorm: norm(deltaVector),
-        cosineToPrev: cosine(curr, prev),
-        normValue: norm(curr)
-      });
+
+    const neuronsPerLayer = 12;
+    const maxLinksPerHop = 20;
+    const vectors = trace.hidden_states.slice(1).map((layerState) => layerState[selectedTokenIndex] ?? []);
+    if (vectors.length < 2 || vectors.some((vec) => vec.length === 0)) {
+      return null;
     }
-    return points;
+
+    const layers: FlowNeuron[][] = vectors.map((vector) =>
+      vector
+        .map((value, dim) => ({ dim, value, absValue: Math.abs(value) }))
+        .sort((a, b) => b.absValue - a.absValue)
+        .slice(0, neuronsPerLayer)
+    );
+
+    const allAbs = layers.flat().map((node) => node.absValue);
+    const globalMaxAbs = Math.max(...allAbs, 1e-9);
+
+    const links: FlowLink[] = [];
+    for (let layer = 0; layer < layers.length - 1; layer += 1) {
+      const left = layers[layer];
+      const right = layers[layer + 1];
+      const ranked: FlowLink[] = [];
+      left.forEach((a, fromRank) => {
+        right.forEach((b, toRank) => {
+          const signed = a.value * b.value;
+          ranked.push({
+            fromLayer: layer,
+            fromRank,
+            toLayer: layer + 1,
+            toRank,
+            strength: Math.abs(signed),
+            positive: signed >= 0
+          });
+        });
+      });
+      ranked.sort((a, b) => b.strength - a.strength);
+      links.push(...ranked.slice(0, maxLinksPerHop));
+    }
+
+    const maxLinkStrength = Math.max(...links.map((link) => link.strength), 1e-9);
+    return {
+      layers,
+      links,
+      globalMaxAbs,
+      maxLinkStrength
+    };
   }, [trace, selectedTokenIndex]);
 
   useEffect(() => {
-    const canvas = transformRef.current;
+    const canvas = neuronFlowRef.current;
     if (!canvas) {
       return;
     }
@@ -349,55 +390,93 @@ export function TraceViewer() {
     }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (!layerTransformSeries || layerTransformSeries.length === 0) {
+    if (!neuronFlowData) {
       ctx.fillStyle = "#5c6c7a";
       ctx.font = "16px ui-sans-serif";
-      ctx.fillText("Hidden states required for layer-transform view.", 20, 36);
+      ctx.fillText("Hidden states required for neuron-flow view.", 20, 36);
       return;
     }
 
-    const padLeft = 38;
-    const padRight = 20;
-    const padTop = 24;
-    const padBottom = 24;
-    const w = canvas.width - padLeft - padRight;
-    const h = canvas.height - padTop - padBottom;
-    const midY = padTop + h * 0.52;
-    const topH = h * 0.48;
-    const bottomH = h * 0.42;
+    const { layers, links, globalMaxAbs, maxLinkStrength } = neuronFlowData;
+    const layerCount = layers.length;
+    const nodeCount = Math.max(...layers.map((nodes) => nodes.length), 1);
+    const padX = 68;
+    const padY = 40;
+    const w = canvas.width - padX * 2;
+    const h = canvas.height - padY * 2;
 
-    const maxDelta = Math.max(...layerTransformSeries.map((point) => point.deltaNorm), 1e-9);
-    const barW = w / Math.max(layerTransformSeries.length, 1);
+    const bg = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    bg.addColorStop(0, "#0b1020");
+    bg.addColorStop(1, "#111827");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    ctx.strokeStyle = "#d5dce4";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(padLeft, padTop, w, topH);
-    ctx.strokeRect(padLeft, midY, w, bottomH);
+    const nodePositions: Array<Array<{ x: number; y: number; node: FlowNeuron }>> = layers.map(
+      (nodes, layerIndex) => {
+        const x = padX + (layerIndex / Math.max(layerCount - 1, 1)) * w;
+        return nodes.map((node, rank) => {
+          const y = padY + ((rank + 0.5) / Math.max(nodeCount, 1)) * h;
+          return { x, y, node };
+        });
+      }
+    );
 
-    layerTransformSeries.forEach((point, index) => {
-      const x = padLeft + index * barW + 2;
-      const usableBar = Math.max(barW - 4, 2);
-
-      const deltaHeight = (point.deltaNorm / maxDelta) * (topH - 8);
-      ctx.fillStyle = index === selectedLayer ? "#ff7a59" : "#209b95";
-      ctx.fillRect(x, padTop + topH - deltaHeight - 2, usableBar, deltaHeight);
-
-      const cosineNorm = (point.cosineToPrev + 1) / 2;
-      const cosineHeight = cosineNorm * (bottomH - 8);
-      ctx.fillStyle = index === selectedLayer ? "#1e3a8a" : "#157f9f";
-      ctx.fillRect(x, midY + bottomH - cosineHeight - 2, usableBar, cosineHeight);
+    links.forEach((link) => {
+      const from = nodePositions[link.fromLayer]?.[link.fromRank];
+      const to = nodePositions[link.toLayer]?.[link.toRank];
+      if (!from || !to) {
+        return;
+      }
+      const t = clamp(link.strength / maxLinkStrength, 0, 1);
+      const alpha = 0.06 + t * 0.42;
+      const width = 0.6 + t * 2.2;
+      ctx.strokeStyle = link.positive
+        ? `rgba(255,136,125,${alpha})`
+        : `rgba(105,203,255,${alpha})`;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      const midX = (from.x + to.x) / 2;
+      const pull = Math.abs(to.x - from.x) * 0.24;
+      ctx.moveTo(from.x, from.y);
+      ctx.bezierCurveTo(midX - pull, from.y, midX + pull, to.y, to.x, to.y);
+      ctx.stroke();
     });
 
-    const selectedX = padLeft + selectedLayer * barW;
-    ctx.strokeStyle = "#111827";
-    ctx.lineWidth = 1.8;
-    ctx.strokeRect(selectedX, padTop, Math.max(barW, 3), h);
+    nodePositions.forEach((nodes, layerIndex) => {
+      nodes.forEach(({ x, y, node }) => {
+        const intensity = clamp(node.absValue / globalMaxAbs, 0, 1);
+        const radius = 3 + intensity * 8;
+        const isSelectedLayer = layerIndex === selectedLayer;
+        const core = node.value >= 0 ? "#ffd9d2" : "#d7f1ff";
+        const glow = node.value >= 0 ? "rgba(255,136,125,0.7)" : "rgba(105,203,255,0.72)";
 
-    ctx.fillStyle = "#486175";
-    ctx.font = "11px ui-sans-serif";
-    ctx.fillText("delta norm (how much token vector changed vs previous layer)", 8, 14);
-    ctx.fillText("cosine to previous layer (direction similarity)", 8, midY - 6);
-  }, [layerTransformSeries, selectedLayer]);
+        ctx.shadowBlur = isSelectedLayer ? 18 : 10;
+        ctx.shadowColor = glow;
+        ctx.fillStyle = core;
+        ctx.beginPath();
+        ctx.arc(x, y, isSelectedLayer ? radius + 1.1 : radius, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    });
+
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(255,255,255,0.22)";
+    ctx.lineWidth = 1;
+    nodePositions.forEach((nodes, layerIndex) => {
+      if (nodes.length === 0) {
+        return;
+      }
+      const x = nodes[0].x;
+      ctx.beginPath();
+      ctx.moveTo(x, padY - 8);
+      ctx.lineTo(x, canvas.height - padY + 8);
+      ctx.stroke();
+
+      ctx.fillStyle = layerIndex === selectedLayer ? "#f8fafc" : "#9fb2c8";
+      ctx.font = layerIndex === selectedLayer ? "12px ui-sans-serif" : "11px ui-sans-serif";
+      ctx.fillText(`L${layerIndex}`, x - 8, 20);
+    });
+  }, [neuronFlowData, selectedLayer]);
 
   function applyTrace(parsed: TraceReport): void {
     setTrace(parsed);
@@ -789,10 +868,12 @@ export function TraceViewer() {
         </article>
 
         <article className="card panel span-2">
-          <h2>Token Transformation by Layer</h2>
-          <p className="subtitle">How the selected token vector changes from layer to layer</p>
+          <h2>Neuron Flow Corridor</h2>
+          <p className="subtitle">
+            3b1b-style layered neuron activation + signed co-activation links (selected token)
+          </p>
           <div className="canvas-wrap">
-            <canvas ref={transformRef} width={900} height={260} />
+            <canvas ref={neuronFlowRef} width={1100} height={380} />
           </div>
           <div className="flow-value">
             Selected token: {trace?.tokens[selectedTokenIndex]?.text ?? "-"} (index {selectedTokenIndex})
