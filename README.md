@@ -80,6 +80,7 @@ Interactive v0 viewer lives in `/Users/philip/Projects/glassbox/viewer` and supp
 - percentile-normalized attention heatmap
 - layer overview heatmap (layers x tokens, residual norms)
 - token connections with top-edge table
+- token transformation panel (layer-to-layer vector change for selected token)
 - residual norm flow plot
 
 Run:
@@ -95,7 +96,7 @@ Then open `http://localhost:3000`.
 
 Use the `Run Prompt` card in the UI:
 - type a prompt
-- default path is real model (`distilgpt2`); use toy only for debugging
+- default path is real instruct model (`HuggingFaceTB/SmolLM2-360M-Instruct`); use toy only for debugging
 - keep `Include hidden states` + `Include attention maps` enabled
 - click `Run Prompt`
 

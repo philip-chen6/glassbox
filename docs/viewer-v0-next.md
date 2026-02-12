@@ -17,6 +17,7 @@
   - Attention heatmap (selected layer/head) with percentile normalization + contrast mapping.
   - Layer overview heatmap (residual norms across all layers and tokens).
   - Token connection arcs (top edges from selected query token) with ranked edge table.
+  - Token transformation panel (per-layer delta-norm and cosine-to-previous-layer for selected token).
   - Residual norm flow chart across layers for selected token.
 
 ## Key decisions
@@ -27,7 +28,7 @@
   - SVG for token edge arcs.
 - Reused CLI JSON as the direct frontend contract (no extra backend required yet).
 - Added a lightweight backend route only for local UX: users can run prompts from UI without manual file export/import.
-- UI defaults to real model path (`distilgpt2`), with toy-model as an explicit debug fallback.
+- UI defaults to an instruct model path (`HuggingFaceTB/SmolLM2-360M-Instruct`), with toy-model as an explicit debug fallback.
 - Sample trace is generated from CLI with both `--include-hidden` and `--include-attention` to validate full-path UI.
 
 ## Notes
