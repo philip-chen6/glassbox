@@ -86,6 +86,7 @@ Run:
 
 ```bash
 cd viewer
+nvm use 22
 pnpm install
 pnpm dev
 ```
