@@ -47,21 +47,24 @@ def run_hf_forward(prompt: str, model_name: str, device: str, max_new_tokens: in
     if attention_mask is not None:
         attention_mask = attention_mask.to(resolved)
 
-    generate_kwargs: dict[str, Any] = {
-        "max_new_tokens": max_new_tokens,
-        "do_sample": False,
-    }
-    if tokenizer.pad_token_id is not None:
-        generate_kwargs["pad_token_id"] = tokenizer.pad_token_id
-    elif tokenizer.eos_token_id is not None:
-        generate_kwargs["pad_token_id"] = tokenizer.eos_token_id
+    if max_new_tokens > 0:
+        generate_kwargs: dict[str, Any] = {
+            "max_new_tokens": max_new_tokens,
+            "do_sample": False,
+        }
+        if tokenizer.pad_token_id is not None:
+            generate_kwargs["pad_token_id"] = tokenizer.pad_token_id
+        elif tokenizer.eos_token_id is not None:
+            generate_kwargs["pad_token_id"] = tokenizer.eos_token_id
 
-    with torch.no_grad():
-        generated_ids = model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            **generate_kwargs,
-        )
+        with torch.no_grad():
+            generated_ids = model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                **generate_kwargs,
+            )
+    else:
+        generated_ids = input_ids
 
     full_attention_mask = torch.ones_like(generated_ids, device=generated_ids.device)
     with torch.no_grad():
