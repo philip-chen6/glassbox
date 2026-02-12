@@ -17,7 +17,10 @@
   - Attention heatmap (selected layer/head) with percentile normalization + contrast mapping.
   - Layer overview heatmap (residual norms across all layers and tokens).
   - Token connection arcs (top edges from selected query token) with ranked edge table.
-  - Neuron flow corridor (layered node activations and signed co-activation links for selected token).
+  - Neuron flow corridor (layered node activations and signed links for selected token), driven by per-layer internals:
+    - residual delta norms
+    - attention output norms
+    - MLP output norms
   - Residual norm flow chart across layers for selected token.
 
 ## Key decisions

@@ -13,6 +13,10 @@
   - Activation distributions.
   - Residual stream L2 norms per token.
   - Attention pattern summaries (entropy, max weights, strongest edge per head).
+- Per-layer internals:
+  - `residual_delta_norms` per token.
+  - `attention_output_norms` per token (when backend exposes attention module outputs).
+  - `mlp_output_norms` per token (when backend exposes MLP module outputs).
 - Optional raw tensor export:
   - `--include-hidden`
   - `--include-attention`
