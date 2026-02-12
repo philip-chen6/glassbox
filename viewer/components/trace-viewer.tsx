@@ -44,7 +44,7 @@ export function TraceViewer() {
   const [trace, setTrace] = useState<TraceReport | null>(null);
   const [error, setError] = useState<string>(INITIAL_ERROR);
   const [promptInput, setPromptInput] = useState("hi how are you");
-  const [modelInput, setModelInput] = useState("distilgpt2");
+  const [modelInput, setModelInput] = useState("HuggingFaceTB/SmolLM2-360M-Instruct");
   const [maxNewTokens, setMaxNewTokens] = useState(24);
   const [useToyModel, setUseToyModel] = useState(false);
   const [includeHidden, setIncludeHidden] = useState(true);

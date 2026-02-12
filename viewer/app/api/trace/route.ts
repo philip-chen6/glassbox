@@ -21,7 +21,7 @@ type RunTraceBody = {
 function normalizeBody(body: RunTraceBody): Required<RunTraceBody> {
   return {
     prompt: String(body.prompt ?? "").trim(),
-    model: String(body.model ?? "distilgpt2"),
+    model: String(body.model ?? "HuggingFaceTB/SmolLM2-360M-Instruct"),
     useToy: Boolean(body.useToy ?? false),
     includeHidden: Boolean(body.includeHidden ?? true),
     includeAttention: Boolean(body.includeAttention ?? true),

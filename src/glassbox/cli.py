@@ -25,8 +25,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--model",
-        default="distilgpt2",
-        help="Hugging Face model name to inspect (default: distilgpt2).",
+        default="HuggingFaceTB/SmolLM2-360M-Instruct",
+        help="Hugging Face model name to inspect (default: HuggingFaceTB/SmolLM2-360M-Instruct).",
     )
     parser.add_argument(
         "--device",
