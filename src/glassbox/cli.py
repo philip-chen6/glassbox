@@ -53,6 +53,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Include raw attention tensors in output (large).",
     )
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=24,
+        help="Number of tokens to generate for answer text (default: 24).",
+    )
     return parser.parse_args(argv)
 
 
@@ -66,6 +72,9 @@ def resolve_prompt(args: argparse.Namespace) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.max_new_tokens < 0:
+        print("--max-new-tokens must be >= 0", file=sys.stderr)
+        return 2
     try:
         prompt = resolve_prompt(args)
     except ValueError as exc:
@@ -77,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         model_name=args.model,
         device=args.device,
         use_toy=args.use_toy,
+        max_new_tokens=args.max_new_tokens,
     )
     report = build_report(
         prompt=prompt,
