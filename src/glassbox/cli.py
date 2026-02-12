@@ -92,7 +92,10 @@ def main(argv: list[str] | None = None) -> int:
         args.output.write_text(rendered + "\n", encoding="utf-8")
         print(f"Wrote report to {args.output}")
     else:
-        print(rendered)
+        try:
+            print(rendered)
+        except BrokenPipeError:
+            return 0
 
     return 0
 
