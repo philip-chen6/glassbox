@@ -337,6 +337,29 @@ export function TraceViewer() {
     return `${value.toFixed(4)} (token=${selectedTokenIndex}, layer=${selectedLayer})`;
   }, [trace, selectedLayer, selectedTokenIndex]);
 
+  const layerInternalsHud = useMemo(() => {
+    if (!trace?.layer_internals?.length) {
+      return [];
+    }
+    const raw = trace.layer_internals.map((layer, layerIndex) => ({
+      layerIndex,
+      delta: layer.residual_delta_norms?.[selectedTokenIndex] ?? 0,
+      attention: layer.attention_output_norms?.[selectedTokenIndex] ?? 0,
+      mlp: layer.mlp_output_norms?.[selectedTokenIndex] ?? 0
+    }));
+
+    const maxDelta = Math.max(...raw.map((item) => item.delta), 1e-9);
+    const maxAttention = Math.max(...raw.map((item) => item.attention), 1e-9);
+    const maxMlp = Math.max(...raw.map((item) => item.mlp), 1e-9);
+
+    return raw.map((item) => ({
+      ...item,
+      deltaNorm: item.delta / maxDelta,
+      attentionNorm: item.attention / maxAttention,
+      mlpNorm: item.mlp / maxMlp
+    }));
+  }, [trace, selectedTokenIndex]);
+
   const neuronFlowData = useMemo(() => {
     if (!trace?.hidden_states || trace.hidden_states.length < 3) {
       return null;
@@ -1046,6 +1069,32 @@ export function TraceViewer() {
             <span className="metric metric-pos">positive link</span>
             <span className="metric metric-neg">negative link</span>
           </div>
+          {layerInternalsHud.length > 0 ? (
+            <div className="internals-hud">
+              {layerInternalsHud.map((item) => (
+                <button
+                  className={item.layerIndex === selectedLayer ? "layer-hud active" : "layer-hud"}
+                  key={`layer-hud-${item.layerIndex}`}
+                  onClick={() => setSelectedLayer(item.layerIndex)}
+                  type="button"
+                >
+                  <span className="layer-hud-title">L{item.layerIndex}</span>
+                  <span className="layer-hud-bars">
+                    <span
+                      className="hud-bar delta"
+                      style={{ height: `${8 + item.deltaNorm * 34}px` }}
+                    />
+                    <span
+                      className="hud-bar attn"
+                      style={{ height: `${8 + item.attentionNorm * 34}px` }}
+                    />
+                    <span className="hud-bar mlp" style={{ height: `${8 + item.mlpNorm * 34}px` }} />
+                  </span>
+                  <span className="layer-hud-value">{item.delta.toFixed(2)}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="flow-value">
             Selected token: {trace?.tokens[selectedTokenIndex]?.text ?? "-"} (index {selectedTokenIndex})
           </div>
