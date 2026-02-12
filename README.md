@@ -98,3 +98,9 @@ Use the `Run Prompt` card in the UI:
 - default path is real model (`distilgpt2`); use toy only for debugging
 - keep `Include hidden states` + `Include attention maps` enabled
 - click `Run Prompt`
+
+If real-model mode errors with missing `transformers`:
+- install dependencies in project venv (with internet access):
+  - `/Users/philip/Projects/glassbox/.venv/bin/python -m ensurepip --upgrade`
+  - `/Users/philip/Projects/glassbox/.venv/bin/python -m pip install -e '.[hf]'`
+- API route uses `/Users/philip/Projects/glassbox/.venv/bin/python` by default.
