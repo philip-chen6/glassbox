@@ -42,12 +42,24 @@ PYTHONPATH=src python3 -m glassbox.cli \
   --output outputs/report.json
 ```
 
+### 4) Include raw activations/attention tensors
+
+```bash
+PYTHONPATH=src python3 -m glassbox.cli \
+  --prompt "show me internals" \
+  --use-toy \
+  --include-hidden \
+  --include-attention
+```
+
 ## Output schema (high-level)
 
 - `tokens`: token index, id, text.
 - `layers[*].activation_distribution`: mean/std/min/max/p01/p99.
 - `layers[*].residual_norms`: per-token L2 norms.
 - `layers[*].attention`: entropy/max-weight summaries + strongest query/key edge per head.
+- `hidden_states` (optional): raw per-layer hidden states `[layer][token][hidden_dim]`.
+- `attentions` (optional): raw per-layer attention maps `[layer][head][query][key]`.
 
 ## Tests
 

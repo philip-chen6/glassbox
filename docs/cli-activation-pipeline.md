@@ -10,6 +10,9 @@
   - Activation distributions.
   - Residual stream L2 norms per token.
   - Attention pattern summaries (entropy, max weights, strongest edge per head).
+- Optional raw tensor export:
+  - `--include-hidden`
+  - `--include-attention`
 - Test coverage for analytics + CLI output generation.
 
 ## Key decisions

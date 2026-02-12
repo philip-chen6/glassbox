@@ -120,7 +120,13 @@ def run_forward(
         )
 
 
-def build_report(prompt: str, artifacts: ForwardArtifacts, warning: str | None = None) -> dict[str, Any]:
+def build_report(
+    prompt: str,
+    artifacts: ForwardArtifacts,
+    warning: str | None = None,
+    include_hidden: bool = False,
+    include_attention: bool = False,
+) -> dict[str, Any]:
     tokens = [
         {"index": idx, "id": token_id, "text": text}
         for idx, (token_id, text) in enumerate(zip(artifacts.token_ids, artifacts.tokens))
@@ -138,4 +144,8 @@ def build_report(prompt: str, artifacts: ForwardArtifacts, warning: str | None =
     }
     if warning:
         report["warning"] = warning
+    if include_hidden:
+        report["hidden_states"] = [layer.tolist() for layer in artifacts.hidden_states]
+    if include_attention:
+        report["attentions"] = [layer.tolist() for layer in artifacts.attentions]
     return report

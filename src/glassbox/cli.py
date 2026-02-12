@@ -43,6 +43,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         help="Optional path to write JSON output.",
     )
+    parser.add_argument(
+        "--include-hidden",
+        action="store_true",
+        help="Include raw hidden state tensors in output (large).",
+    )
+    parser.add_argument(
+        "--include-attention",
+        action="store_true",
+        help="Include raw attention tensors in output (large).",
+    )
     return parser.parse_args(argv)
 
 
@@ -68,7 +78,13 @@ def main(argv: list[str] | None = None) -> int:
         device=args.device,
         use_toy=args.use_toy,
     )
-    report = build_report(prompt=prompt, artifacts=artifacts, warning=warning)
+    report = build_report(
+        prompt=prompt,
+        artifacts=artifacts,
+        warning=warning,
+        include_hidden=args.include_hidden,
+        include_attention=args.include_attention,
+    )
     rendered = json.dumps(report, indent=2)
 
     if args.output:
