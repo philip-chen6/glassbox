@@ -1,1 +1,56 @@
 # glassbox
+
+CLI-first tooling for inspecting internal transformer signals (attention, activation distributions, residual stream norms) from a prompt.
+
+## What exists now
+
+- `glassbox` CLI that accepts a prompt and outputs JSON summaries.
+- Hugging Face path (when `transformers` is installed) for real model introspection.
+- Built-in toy causal transformer fallback for zero-setup local runs.
+- Core tests for metrics and CLI behavior.
+
+## Quick start
+
+### 1) Run with the built-in toy model
+
+```bash
+PYTHONPATH=src python3 -m glassbox.cli --prompt "why attention works" --use-toy
+```
+
+### 2) Run with a Hugging Face model
+
+Install optional dependency:
+
+```bash
+pip install ".[hf]"
+```
+
+Then run:
+
+```bash
+PYTHONPATH=src python3 -m glassbox.cli --prompt "why attention works" --model distilgpt2
+```
+
+If HF dependencies are missing or model loading fails, the CLI automatically falls back to the toy model and includes a `warning` in output.
+
+### 3) Save output to JSON
+
+```bash
+PYTHONPATH=src python3 -m glassbox.cli \
+  --prompt "explain residual stream norms" \
+  --use-toy \
+  --output outputs/report.json
+```
+
+## Output schema (high-level)
+
+- `tokens`: token index, id, text.
+- `layers[*].activation_distribution`: mean/std/min/max/p01/p99.
+- `layers[*].residual_norms`: per-token L2 norms.
+- `layers[*].attention`: entropy/max-weight summaries + strongest query/key edge per head.
+
+## Tests
+
+```bash
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+```
