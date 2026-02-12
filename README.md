@@ -69,3 +69,22 @@ PYTHONPATH=src python3 -m glassbox.cli \
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
+
+## Viewer (Next.js)
+
+Interactive v0 viewer lives in `/Users/philip/Projects/glassbox/viewer` and supports:
+- JSON upload
+- sample trace loading
+- token timeline playback
+- attention heatmap + token connections
+- residual norm flow plot
+
+Run:
+
+```bash
+cd viewer
+pnpm install
+pnpm dev
+```
+
+Then open `http://localhost:3000`.
