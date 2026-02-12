@@ -14,8 +14,9 @@
   - Play/pause token playback with speed control.
   - Prompt options (toy/HF, max new tokens, include hidden, include attention).
 - Visualization panels:
-  - Attention heatmap (selected layer/head).
-  - Token connection arcs (top edges from selected query token).
+  - Attention heatmap (selected layer/head) with percentile normalization + contrast mapping.
+  - Layer overview heatmap (residual norms across all layers and tokens).
+  - Token connection arcs (top edges from selected query token) with ranked edge table.
   - Residual norm flow chart across layers for selected token.
 
 ## Key decisions
@@ -26,6 +27,7 @@
   - SVG for token edge arcs.
 - Reused CLI JSON as the direct frontend contract (no extra backend required yet).
 - Added a lightweight backend route only for local UX: users can run prompts from UI without manual file export/import.
+- UI defaults to real model path (`distilgpt2`), with toy-model as an explicit debug fallback.
 - Sample trace is generated from CLI with both `--include-hidden` and `--include-attention` to validate full-path UI.
 
 ## Notes

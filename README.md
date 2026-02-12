@@ -77,7 +77,9 @@ Interactive v0 viewer lives in `/Users/philip/Projects/glassbox/viewer` and supp
 - JSON upload
 - sample trace loading
 - token timeline playback
-- attention heatmap + token connections
+- percentile-normalized attention heatmap
+- layer overview heatmap (layers x tokens, residual norms)
+- token connections with top-edge table
 - residual norm flow plot
 
 Run:
@@ -92,6 +94,6 @@ Then open `http://localhost:3000`.
 
 Use the `Run Prompt` card in the UI:
 - type a prompt
-- choose toy/HF model
+- default path is real model (`distilgpt2`); use toy only for debugging
 - keep `Include hidden states` + `Include attention maps` enabled
 - click `Run Prompt`
