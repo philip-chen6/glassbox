@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
@@ -28,6 +29,18 @@ function normalizeBody(body: RunTraceBody): Required<RunTraceBody> {
   };
 }
 
+function resolvePythonBinary(repoRoot: string): string {
+  const fromEnv = process.env.GLASSBOX_PYTHON?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+  const venvPython = path.join(repoRoot, ".venv", "bin", "python");
+  if (existsSync(venvPython)) {
+    return venvPython;
+  }
+  return "python3";
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body = normalizeBody((await request.json()) as RunTraceBody);
@@ -55,8 +68,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (body.includeAttention) {
       args.push("--include-attention");
     }
+    const pythonBinary = resolvePythonBinary(repoRoot);
 
-    const { stdout, stderr } = await execFileAsync("python3", args, {
+    const { stdout, stderr } = await execFileAsync(pythonBinary, args, {
       cwd: repoRoot,
       env: {
         ...process.env,
@@ -70,7 +84,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       console.warn(stderr);
     }
 
-    const trace = JSON.parse(stdout);
+    const trace = JSON.parse(stdout) as {
+      source?: string;
+      warning?: string;
+      [key: string]: unknown;
+    };
+    if (!body.useToy && trace.source === "toy") {
+      const warning = trace.warning ?? "Fell back to toy model.";
+      return NextResponse.json(
+        {
+          error: `${warning} Install transformers and ensure model download is available, or enable 'Force toy model (debug)'.`
+        },
+        { status: 503 }
+      );
+    }
     return NextResponse.json({ trace });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to generate trace.";
