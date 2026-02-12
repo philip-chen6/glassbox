@@ -87,6 +87,11 @@ type LayerSignal = {
   mlp: number;
 };
 
+function cubicPoint(a: number, b: number, c: number, d: number, t: number): number {
+  const u = 1 - t;
+  return u * u * u * a + 3 * u * u * t * b + 3 * u * t * t * c + t * t * t * d;
+}
+
 export function TraceViewer() {
   const [trace, setTrace] = useState<TraceReport | null>(null);
   const [error, setError] = useState<string>(INITIAL_ERROR);
@@ -423,9 +428,8 @@ export function TraceViewer() {
     if (!ctx) {
       return;
     }
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
     if (!neuronFlowData) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = "#5c6c7a";
       ctx.font = "16px ui-sans-serif";
       ctx.fillText("Hidden states required for neuron-flow view.", 20, 36);
@@ -439,20 +443,17 @@ export function TraceViewer() {
     const padY = 72;
     const w = canvas.width - padX * 2;
     const h = canvas.height - padY * 2;
+    let frameId = 0;
 
-    const bg = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-    bg.addColorStop(0, "#0b1020");
-    bg.addColorStop(1, "#111827");
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    const metricBaseY = 16;
-    const metricHeight = 28;
     const drawMetricRibbon = (
       key: keyof LayerSignal,
       color: string,
       label: string,
-      offset: number
+      offset: number,
+      phase: number,
+      metricBaseY: number,
+      metricHeight: number,
+      timePhase: number
     ) => {
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.8;
@@ -461,7 +462,8 @@ export function TraceViewer() {
       layerSignals.forEach((signal, layerIndex) => {
         const x = padX + (layerIndex / Math.max(layerCount - 1, 1)) * w;
         const value = signal[key];
-        const y = metricBaseY + offset + metricHeight - value * metricHeight;
+        const wiggle = Math.sin(timePhase * 3.2 + layerIndex * 0.45 + phase) * 1.6;
+        const y = metricBaseY + offset + metricHeight - value * metricHeight + wiggle;
         if (layerIndex === 0) {
           ctx.moveTo(x, y);
         } else {
@@ -475,77 +477,169 @@ export function TraceViewer() {
       ctx.globalAlpha = 1;
     };
 
-    drawMetricRibbon("delta", "#ff8f7a", "delta", 0);
-    drawMetricRibbon("attention", "#74d7ff", "attn", 10);
-    drawMetricRibbon("mlp", "#9dff9d", "mlp", 20);
+    const draw = (timeMs: number) => {
+      const timePhase = timeMs * 0.001;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const nodePositions: Array<Array<{ x: number; y: number; node: FlowNeuron }>> = layers.map(
-      (nodes, layerIndex) => {
-        const x = padX + (layerIndex / Math.max(layerCount - 1, 1)) * w;
-        return nodes.map((node, rank) => {
-          const y = padY + ((rank + 0.5) / Math.max(nodeCount, 1)) * h;
-          return { x, y, node };
-        });
+      const bg = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+      bg.addColorStop(0, "#060b17");
+      bg.addColorStop(0.56, "#0a1530");
+      bg.addColorStop(1, "#050a15");
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.globalAlpha = 0.13;
+      for (let index = 0; index < 64; index += 1) {
+        const x = ((index * 127) % canvas.width) + Math.sin(timePhase + index) * 4;
+        const y = ((index * 211) % canvas.height) + Math.cos(timePhase * 0.9 + index) * 5;
+        ctx.fillStyle = index % 2 === 0 ? "#6bd3ff" : "#ff9d85";
+        ctx.fillRect(x, y, 1.4, 1.4);
       }
-    );
+      ctx.globalAlpha = 1;
 
-    links.forEach((link) => {
-      const from = nodePositions[link.fromLayer]?.[link.fromRank];
-      const to = nodePositions[link.toLayer]?.[link.toRank];
-      if (!from || !to) {
-        return;
-      }
-      const t = clamp(link.strength / maxLinkStrength, 0, 1);
-      const alpha = 0.06 + t * 0.42;
-      const width = 0.6 + t * 2.2;
-      ctx.strokeStyle = link.positive
-        ? `rgba(255,136,125,${alpha})`
-        : `rgba(105,203,255,${alpha})`;
-      ctx.lineWidth = width;
-      ctx.beginPath();
-      const midX = (from.x + to.x) / 2;
-      const pull = Math.abs(to.x - from.x) * 0.24;
-      ctx.moveTo(from.x, from.y);
-      ctx.bezierCurveTo(midX - pull, from.y, midX + pull, to.y, to.x, to.y);
-      ctx.stroke();
-    });
+      const metricBaseY = 16;
+      const metricHeight = 28;
+      drawMetricRibbon("delta", "#ff8f7a", "delta", 0, 0.3, metricBaseY, metricHeight, timePhase);
+      drawMetricRibbon("attention", "#74d7ff", "attn", 10, 1.1, metricBaseY, metricHeight, timePhase);
+      drawMetricRibbon("mlp", "#9dff9d", "mlp", 20, 2.1, metricBaseY, metricHeight, timePhase);
 
-    nodePositions.forEach((nodes, layerIndex) => {
-      nodes.forEach(({ x, y, node }) => {
-        const intensity = clamp(node.absValue / globalMaxAbs, 0, 1);
-        const signal = layerSignals[layerIndex];
-        const signalBoost = 1 + signal.delta * 0.9 + signal.attention * 0.55 + signal.mlp * 0.4;
-        const radius = (3 + intensity * 8) * signalBoost;
-        const isSelectedLayer = layerIndex === selectedLayer;
-        const core = node.value >= 0 ? "#ffd9d2" : "#d7f1ff";
-        const glow = node.value >= 0 ? "rgba(255,136,125,0.7)" : "rgba(105,203,255,0.72)";
+      const nodePositions: Array<Array<{ x: number; y: number; node: FlowNeuron }>> = layers.map(
+        (nodes, layerIndex) => {
+          const t = layerIndex / Math.max(layerCount - 1, 1);
+          const perspective = Math.pow(t, 0.92);
+          const x = padX + perspective * w;
+          return nodes.map((node, rank) => {
+            const laneY = padY + ((rank + 0.5) / Math.max(nodeCount, 1)) * h;
+            const depthSqueeze = (0.5 - rank / Math.max(nodeCount - 1, 1)) * (1 - t) * 12;
+            const depthOffset = Math.sin(layerIndex * 0.34 + timePhase * 0.4) * (5.5 - t * 1.6);
+            const wobble = Math.cos(rank * 0.7 + layerIndex * 0.24 + timePhase * 1.5) * (1.2 + (1 - t) * 0.6);
+            const y = laneY + depthOffset + wobble + depthSqueeze;
+            return { x, y, node };
+          });
+        }
+      );
 
-        ctx.shadowBlur = isSelectedLayer ? 18 : 10;
-        ctx.shadowColor = glow;
-        ctx.fillStyle = core;
+      links.forEach((link, idx) => {
+        const from = nodePositions[link.fromLayer]?.[link.fromRank];
+        const to = nodePositions[link.toLayer]?.[link.toRank];
+        if (!from || !to) {
+          return;
+        }
+        const t = clamp(link.strength / maxLinkStrength, 0, 1);
+        const pulse = 0.86 + Math.sin(timePhase * 3 + idx * 0.35) * 0.18;
+        const alpha = (0.05 + t * 0.42) * pulse;
+        const width = (0.6 + t * 2.2) * pulse;
+        ctx.strokeStyle = link.positive
+          ? `rgba(255,136,125,${alpha})`
+          : `rgba(105,203,255,${alpha})`;
+        ctx.lineWidth = width;
+        const midX = (from.x + to.x) / 2;
+        const pull = Math.abs(to.x - from.x) * (0.2 + 0.06 * Math.sin(timePhase + idx));
+        const c1x = midX - pull;
+        const c2x = midX + pull;
+        const c1y = from.y;
+        const c2y = to.y;
         ctx.beginPath();
-        ctx.arc(x, y, isSelectedLayer ? radius + 1.1 : radius, 0, Math.PI * 2);
+        ctx.moveTo(from.x, from.y);
+        ctx.bezierCurveTo(c1x, c1y, c2x, c2y, to.x, to.y);
+        ctx.stroke();
+
+        const travel = (timePhase * 0.22 + idx * 0.013 + link.fromLayer * 0.02) % 1;
+        const pulseX = cubicPoint(from.x, c1x, c2x, to.x, travel);
+        const pulseY = cubicPoint(from.y, c1y, c2y, to.y, travel);
+        ctx.fillStyle = link.positive
+          ? "rgba(255,198,188,0.95)"
+          : "rgba(188,236,255,0.95)";
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = link.positive ? "rgba(255,148,120,0.8)" : "rgba(113,205,255,0.8)";
+        ctx.beginPath();
+        ctx.arc(pulseX, pulseY, 0.9 + t * 1.8, 0, Math.PI * 2);
         ctx.fill();
       });
-    });
 
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = "rgba(255,255,255,0.22)";
-    ctx.lineWidth = 1;
-    nodePositions.forEach((nodes, layerIndex) => {
-      if (nodes.length === 0) {
-        return;
-      }
-      const x = nodes[0].x;
-      ctx.beginPath();
-      ctx.moveTo(x, padY - 8);
-      ctx.lineTo(x, canvas.height - padY + 8);
-      ctx.stroke();
+      nodePositions.forEach((nodes, layerIndex) => {
+        nodes.forEach(({ x, y, node }, nodeIdx) => {
+          const intensity = clamp(node.absValue / globalMaxAbs, 0, 1);
+          const signal = layerSignals[layerIndex];
+          const signalBoost = 1 + signal.delta * 0.9 + signal.attention * 0.55 + signal.mlp * 0.4;
+          const pulse = 1 + Math.sin(timePhase * 2.3 + nodeIdx * 0.45 + layerIndex * 0.2) * 0.15;
+          const radius = (3 + intensity * 8) * signalBoost * pulse;
+          const isSelectedLayer = layerIndex === selectedLayer;
+          const core = node.value >= 0 ? "#ffd9d2" : "#d7f1ff";
+          const glow = node.value >= 0 ? "rgba(255,136,125,0.8)" : "rgba(105,203,255,0.85)";
 
-      ctx.fillStyle = layerIndex === selectedLayer ? "#f8fafc" : "#9fb2c8";
-      ctx.font = layerIndex === selectedLayer ? "12px ui-sans-serif" : "11px ui-sans-serif";
-      ctx.fillText(`L${layerIndex}`, x - 8, 58);
-    });
+          ctx.shadowBlur = isSelectedLayer ? 22 : 12;
+          ctx.shadowColor = glow;
+          ctx.fillStyle = core;
+          ctx.beginPath();
+          ctx.arc(x, y, isSelectedLayer ? radius + 1.2 : radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          if (isSelectedLayer) {
+            ctx.globalAlpha = 0.4;
+            ctx.beginPath();
+            ctx.arc(x, y, radius + 6 + Math.sin(timePhase * 1.8 + nodeIdx) * 1.8, 0, Math.PI * 2);
+            ctx.strokeStyle = node.value >= 0 ? "rgba(255,174,161,0.7)" : "rgba(150,225,255,0.7)";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+          }
+        });
+      });
+
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = "rgba(255,255,255,0.22)";
+      ctx.lineWidth = 1;
+      nodePositions.forEach((nodes, layerIndex) => {
+        if (nodes.length === 0) {
+          return;
+        }
+        const x = nodes[0].x;
+        ctx.beginPath();
+        ctx.moveTo(x, padY - 8);
+        ctx.lineTo(x, canvas.height - padY + 8);
+        ctx.stroke();
+
+        ctx.fillStyle = layerIndex === selectedLayer ? "#f8fafc" : "#9fb2c8";
+        ctx.font = layerIndex === selectedLayer ? "12px ui-sans-serif" : "11px ui-sans-serif";
+        ctx.fillText(`L${layerIndex}`, x - 8, 58);
+      });
+
+      const stripY = canvas.height - 18;
+      const stripWidth = Math.max(3.2, Math.min(14, w / Math.max(layerCount * 1.7, 1)));
+      nodePositions.forEach((nodes, layerIndex) => {
+        if (nodes.length === 0) {
+          return;
+        }
+        const x = nodes[0].x - stripWidth / 2;
+        const signal = layerSignals[layerIndex];
+        const d = 2 + signal.delta * 14;
+        const a = 2 + signal.attention * 14;
+        const m = 2 + signal.mlp * 14;
+
+        ctx.fillStyle = "rgba(6,13,28,0.9)";
+        ctx.fillRect(x - 1, stripY - 34, stripWidth + 2, 36);
+        ctx.fillStyle = "rgba(255,143,122,0.95)";
+        ctx.fillRect(x, stripY - d, stripWidth, d);
+        ctx.fillStyle = "rgba(116,215,255,0.94)";
+        ctx.fillRect(x, stripY - d - a, stripWidth, a);
+        ctx.fillStyle = "rgba(157,255,157,0.94)";
+        ctx.fillRect(x, stripY - d - a - m, stripWidth, m);
+      });
+
+      const sweepX = ((timePhase * 70) % (canvas.width + 180)) - 180;
+      const sweep = ctx.createLinearGradient(sweepX, 0, sweepX + 180, 0);
+      sweep.addColorStop(0, "rgba(118,191,255,0)");
+      sweep.addColorStop(0.5, "rgba(118,191,255,0.14)");
+      sweep.addColorStop(1, "rgba(118,191,255,0)");
+      ctx.fillStyle = sweep;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      frameId = window.requestAnimationFrame(draw);
+    };
+
+    frameId = window.requestAnimationFrame(draw);
+    return () => window.cancelAnimationFrame(frameId);
   }, [neuronFlowData, selectedLayer]);
 
   function applyTrace(parsed: TraceReport): void {
