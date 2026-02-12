@@ -25,6 +25,14 @@ class CLITests(unittest.TestCase):
             self.assertGreaterEqual(report["num_tokens"], 1)
             self.assertGreaterEqual(report["num_layers"], 1)
             self.assertEqual(len(report["layers"]), report["num_layers"])
+            self.assertIn("answer_text", report)
+            self.assertIn("prompt_token_count", report)
+            self.assertIn("generated_token_count", report)
+            self.assertGreater(report["generated_token_count"], 0)
+            self.assertEqual(
+                report["num_tokens"],
+                report["prompt_token_count"] + report["generated_token_count"],
+            )
 
     def test_cli_can_include_raw_hidden_states(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -64,6 +72,25 @@ class CLITests(unittest.TestCase):
             self.assertIn("attentions", report)
             self.assertEqual(len(report["hidden_states"]), report["num_layers"] + 1)
             self.assertEqual(len(report["attentions"]), report["num_layers"])
+
+    def test_cli_can_disable_generation(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out_file = Path(tmp_dir) / "report_no_generation.json"
+            exit_code = main(
+                [
+                    "--prompt",
+                    "short prompt",
+                    "--use-toy",
+                    "--max-new-tokens",
+                    "0",
+                    "--output",
+                    str(out_file),
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+            report = json.loads(out_file.read_text(encoding="utf-8"))
+            self.assertEqual(report["generated_token_count"], 0)
+            self.assertEqual(report["answer_text"], "")
 
 
 if __name__ == "__main__":
